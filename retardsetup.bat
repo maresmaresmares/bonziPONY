@@ -7,6 +7,9 @@ echo     bonziPONY v1.69 — One-Click Setup
 echo  ============================================
 echo.
 
+:: ── Find the script's own directory and cd into it ───────────
+cd /d "%~dp0"
+
 :: ── Check Python ──────────────────────────────────────────────
 python --version >nul 2>&1
 if errorlevel 1 (
@@ -22,27 +25,33 @@ for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
 echo  [OK] Python %PYVER% found.
 
 :: ── Create venv if it doesn't exist ──────────────────────────
-if not exist "venv\" (
+if not exist "venv\Scripts\python.exe" (
     echo.
     echo  Creating virtual environment...
     python -m venv venv
     if errorlevel 1 (
         echo  [ERROR] Failed to create venv. Continuing without it...
-        goto :skip_venv
+        set PY=python
+        goto :install
     )
     echo  [OK] Virtual environment created.
 )
 
-:: ── Activate venv ────────────────────────────────────────────
-call venv\Scripts\activate.bat 2>nul
-echo  [OK] Virtual environment activated.
+:: ── Use venv python directly (more reliable than activate) ───
+set PY=venv\Scripts\python.exe
+set PIP=venv\Scripts\pip.exe
+echo  [OK] Using venv Python.
+goto :install
 
-:skip_venv
+:install
+
+:: ── Set PIP fallback if not using venv ───────────────────────
+if not defined PIP set PIP=pip
 
 :: ── Upgrade pip ──────────────────────────────────────────────
 echo.
 echo  Upgrading pip...
-python -m pip install --upgrade pip --quiet
+%PY% -m pip install --upgrade pip --quiet
 echo  [OK] pip upgraded.
 
 :: ── Install dependencies ─────────────────────────────────────
@@ -50,11 +59,11 @@ echo.
 echo  Installing dependencies (this may take a while)...
 echo  If torch/transformers are slow, be patient — they're big.
 echo.
-pip install -r requirements-lock.txt
+%PIP% install -r requirements-lock.txt
 if errorlevel 1 (
     echo.
     echo  [WARN] Lockfile install had issues, trying loose requirements...
-    pip install -r requirements.txt
+    %PIP% install -r requirements.txt
 )
 echo.
 echo  [OK] Dependencies installed.
@@ -87,7 +96,7 @@ echo  Double-click or say the wake word to chat.
 echo  Close this window to kill the pony.
 echo.
 
-python main.py
+%PY% main.py
 
 if errorlevel 1 (
     echo.
