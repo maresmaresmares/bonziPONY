@@ -1,0 +1,27 @@
+# Personal config (has API keys)
+config.yaml
+
+# Runtime personal data
+memory/*
+diary/*
+logs/*
+voice_profile/*
+directives.json
+routines.json
+wake_state.json
+
+# Keep empty dirs in repo
+!memory/.gitkeep
+!diary/.gitkeep
+!logs/.gitkeep
+
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
