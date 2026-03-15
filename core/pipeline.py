@@ -201,6 +201,29 @@ class Pipeline:
                 pass
         self._transition(PipelineState.IDLE)
 
+    def run_text_conversation(self, text: str) -> None:
+        """Handle a typed message — skips STT, goes straight to LLM."""
+        if self._on_conversation_start:
+            try:
+                self._on_conversation_start()
+            except Exception:
+                pass
+
+        if self.agent_loop:
+            self.agent_loop.set_conversation_active(True)
+
+        self._last_end_conversation = False
+        spoke = self._run_turn(play_ack=False, user_text=text)
+
+        if self.agent_loop:
+            self.agent_loop.set_conversation_active(False)
+        if self._on_conversation_end:
+            try:
+                self._on_conversation_end()
+            except Exception:
+                pass
+        self._transition(PipelineState.IDLE)
+
     def speak_spontaneously(self) -> None:
         """
         Generate an unprompted remark that goes INTO history so Dash remembers it.
@@ -325,11 +348,13 @@ class Pipeline:
                 hint = (
                     "\n\n[System hint: If the user mentioned ANYTHING they need to do, should do, "
                     "or have been neglecting (eating, showering, homework, sleeping, chores, etc.), "
-                    "create a [DIRECTIVE:goal:urgency] for it. Be their accountability partner."
+                    "create a [DIRECTIVE:goal:urgency] for it. The goal must be a DIRECT ACTION "
+                    "like 'eat food', 'go to sleep', 'do homework' — NEVER 'remind user to' or 'get user to'. "
+                    "Be their accountability partner."
                 )
                 if self.agent_loop.has_directives:
                     directives_list = "; ".join(
-                        f'"{d.goal}" (urgency {d.urgency})'
+                        f'"{d.goal}" (urgency {d.urgency}{", ALREADY DELAYED" if d.delayed else ""})'
                         for d in self.agent_loop.directives
                     )
                     hint += (
@@ -340,6 +365,13 @@ class Pipeline:
                         " ASK how long it'll take, then on their answer use [ENFORCE:minutes]."
                         " Do NOT guess the enforcement time — ask first."
                     )
+                hint += (
+                    " If the user asks you to DELAY a directive (e.g. 'give me an hour', 'I'll do it later'),"
+                    " you may grant ONE delay per directive using [DELAY:minutes] or [DELAY:minutes:keyword]."
+                    " Example: 'okay, you have one hour' [DELAY:60]. But if the directive was ALREADY delayed"
+                    " once, REFUSE. Say 'no, you already got your extension. go do it NOW.' Do NOT give a"
+                    " second delay under any circumstances — the user had their chance."
+                )
                 hint += (
                     " IMPORTANT: Include [CONVO:CONTINUE] if you expect a reply (asked a question, "
                     "mid-conversation) or [CONVO:END] if the conversation is naturally over (goodbye, "
@@ -469,6 +501,14 @@ class Pipeline:
                 )
             logger.debug("Conversation flow: end=%s (tag_present=%s, parsed_end=%s)",
                          self._last_end_conversation, _convo_tag_present, parsed.end_conversation)
+
+            # Delay negotiation — user convinced pony to delay a directive
+            if parsed.delay_minutes and self.agent_loop and self.agent_loop.has_directives:
+                ok = self.agent_loop.delay_directive(parsed.delay_minutes, parsed.delay_keyword)
+                if ok:
+                    logger.info("Directive delayed by %d minutes (keyword=%r)", parsed.delay_minutes, parsed.delay_keyword)
+                else:
+                    logger.info("Delay rejected — directive already delayed or not found")
 
             # Enforcement mode — LLM detected user is going to do the task
             if parsed.enforce_minutes and self.agent_loop and self.agent_loop.has_directives:

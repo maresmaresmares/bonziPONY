@@ -140,6 +140,7 @@ class Directive:
     source: str = "user"               # "user" or "self"
     trigger_time: Optional[str] = None # wall-clock trigger time e.g. "21:00"
     triggered: bool = False            # has the timer fired?
+    delayed: bool = False              # user already negotiated a delay once
 
 
 @dataclass
@@ -245,6 +246,7 @@ class AgentLoop:
                     source=dd.get("source", "user"),
                     trigger_time=dd.get("trigger_time"),
                     triggered=dd.get("triggered", False),
+                    delayed=dd.get("delayed", False),
                 )
                 self.directives.append(d)
 
@@ -292,6 +294,7 @@ class AgentLoop:
                     "source": d.source,
                     "trigger_time": d.trigger_time,
                     "triggered": d.triggered,
+                    "delayed": d.delayed,
                 })
 
             enf_data = None
@@ -321,11 +324,20 @@ class AgentLoop:
 
     # ── Public API ──────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _clean_goal(goal: str) -> str:
+        """Strip 'remind user to' / 'get user to' phrasing from directive goals."""
+        import re as _re
+        goal = _re.sub(r'^(?:remind|tell|get|make|have|nag)\s+(?:the\s+)?user\s+(?:to\s+)?', '', goal, flags=_re.IGNORECASE)
+        goal = _re.sub(r'^(?:remind|tell|get|make|have|nag)\s+(?:them|him|her)\s+(?:to\s+)?', '', goal, flags=_re.IGNORECASE)
+        return goal.strip()
+
     def add_directive(self, goal: str, urgency: int, source: str = "user") -> None:
         """Add a new directive (max ``max_directives``)."""
         if len(self.directives) >= self._config.max_directives:
             logger.warning("Max directives reached (%d) — ignoring new directive.", self._config.max_directives)
             return
+        goal = self._clean_goal(goal)
         urgency = max(1, min(10, urgency))
         now = time.monotonic()
         d = Directive(goal=goal, urgency=urgency, created_at=now, last_action_at=now, source=source)
@@ -409,6 +421,56 @@ class AgentLoop:
         if count:
             logger.info("All %d directive(s) cleared.", count)
         self.save_directives()
+
+    def delay_directive(self, minutes: int, goal_keyword: str = "") -> bool:
+        """User negotiated a delay — replace directive with a new timed one.
+
+        Returns False if the directive was already delayed once (no second chances).
+        """
+        # Find the matching directive
+        target = None
+        for d in self.directives:
+            if goal_keyword and goal_keyword.lower() in d.goal.lower():
+                target = d
+                break
+        if target is None:
+            # Fall back to highest urgency actionable directive
+            actionable = [d for d in self.directives if not (d.trigger_time and not d.triggered)]
+            if actionable:
+                target = max(actionable, key=lambda d: d.urgency)
+        if target is None:
+            return False
+
+        # ONE delay per directive, ever
+        if target.delayed:
+            return False
+
+        # Calculate the new trigger time
+        fire_at = datetime.now()
+        fire_at = fire_at.replace(second=0, microsecond=0)
+        fire_minutes = fire_at.hour * 60 + fire_at.minute + minutes
+        new_h = (fire_minutes // 60) % 24
+        new_m = fire_minutes % 60
+        new_time = f"{new_h:02d}:{new_m:02d}"
+
+        # Remove the old directive, add a new timed one with delayed=True
+        goal = target.goal
+        self.directives.remove(target)
+        now = time.monotonic()
+        d = Directive(
+            goal=goal,
+            urgency=6,  # reset urgency but not too low
+            created_at=now,
+            last_action_at=now,
+            source="delay",
+            trigger_time=new_time,
+            triggered=False,
+            delayed=True,  # NO more delays allowed
+        )
+        self.directives.append(d)
+        self.save_directives()
+        logger.info("Directive delayed: %r -> fires at %s (delayed=True, no more delays)", goal, new_time)
+        return True
 
     def set_conversation_active(self, active: bool) -> None:
         """Pause/resume autonomous behavior during conversations."""
@@ -594,45 +656,72 @@ class AgentLoop:
         logger.info("ENFORCEMENT LOCKDOWN for %r", goal)
         print(f"[ENFORCEMENT LOCKDOWN] Locking computer until user goes to {goal}")
 
+        # At urgency 10 — permanent mouse lock (ClipCursor to a tiny box)
+        urgency_10 = any(d.urgency >= 10 and d.goal == goal for d in self.directives)
+        cursor_locked = False
+        if urgency_10 and self._desktop:
+            try:
+                import ctypes
+                import ctypes.wintypes
+                # Lock cursor to a 1x1 box at center of screen
+                sw, sh = self._desktop._pyautogui.size()
+                cx, cy = sw // 2, sh // 2
+                rect = ctypes.wintypes.RECT(cx, cy, cx + 1, cy + 1)
+                ctypes.windll.user32.ClipCursor(ctypes.byref(rect))
+                cursor_locked = True
+                logger.info("Cursor LOCKED at (%d,%d) — urgency 10", cx, cy)
+            except Exception as exc:
+                logger.warning("ClipCursor failed: %s", exc)
+
         lockdown_round = 0
-        while self._enforcement.active:
-            lockdown_round += 1
+        try:
+            while self._enforcement.active:
+                lockdown_round += 1
 
-            # Minimize all windows
-            if self._desktop:
-                self._desktop.minimize_all_windows()
+                # Minimize all windows
+                if self._desktop:
+                    self._desktop.minimize_all_windows()
 
-            # Mess with mouse for 10 seconds
-            if self._desktop:
-                self._desktop.mess_with_mouse(duration=10.0, jitter=120)
+                # Mess with mouse for 10 seconds (at urgency 10, mouse is locked anyway)
+                if self._desktop and not cursor_locked:
+                    self._desktop.mess_with_mouse(duration=10.0, jitter=120)
+                elif cursor_locked:
+                    time.sleep(10.0)  # mouse is locked, just wait
 
-            # Brief pause, then ask again
-            time.sleep(1.0)
+                # Brief pause, then ask again
+                time.sleep(1.0)
 
-            if lockdown_round % 2 == 0:
-                # Every other round, ask if they've done it
-                self._speak(f"have you done it yet? go {goal}!")
-            else:
-                self._speak("I'm not giving your computer back until you do it.")
+                if lockdown_round % 2 == 0:
+                    self._speak(f"have you done it yet? go {goal}!")
+                else:
+                    if cursor_locked:
+                        self._speak(f"if you want control back, you gotta go {goal}!")
+                    else:
+                        self._speak("I'm not giving your computer back until you do it.")
 
-            response = self._enforcement_listen(timeout=6.0)
-            if response:
-                response_lower = response.lower()
-                # Check for "yes I did it"
-                if any(kw in response_lower for kw in self._YES_KEYWORDS):
-                    self._speak("finally. okay, you're free.")
-                    self._enforcement_complete()
-                    return
-                # Check for "stop" / "knock it off" — emergency exit
-                _STOP = ("stop", "quit", "enough", "shut up", "knock it off", "cut it out")
-                if any(kw in response_lower for kw in _STOP):
-                    self._speak("ugh, fine. but you still need to do it.")
-                    self._enforcement = EnforcementMode()
-                    self.save_directives()
-                    return
+                response = self._enforcement_listen(timeout=6.0)
+                if response:
+                    response_lower = response.lower()
+                    if any(kw in response_lower for kw in self._YES_KEYWORDS):
+                        self._speak("finally. okay, you're free.")
+                        self._enforcement_complete()
+                        return
+                    _STOP = ("stop", "quit", "enough", "shut up", "knock it off", "cut it out")
+                    if any(kw in response_lower for kw in _STOP):
+                        self._speak("ugh, fine. but you still need to do it.")
+                        self._enforcement = EnforcementMode()
+                        self.save_directives()
+                        return
 
-            # Keep going — they haven't done it
-            logger.info("Lockdown round %d — user still hasn't done %r", lockdown_round, goal)
+                logger.info("Lockdown round %d — user still hasn't done %r", lockdown_round, goal)
+        finally:
+            # ALWAYS release cursor lock when exiting lockdown
+            if cursor_locked:
+                try:
+                    ctypes.windll.user32.ClipCursor(None)
+                    logger.info("Cursor lock released.")
+                except Exception:
+                    pass
 
     @staticmethod
     def _ordinal(n: int) -> str:
@@ -789,9 +878,10 @@ class AgentLoop:
             for i, d in enumerate(actionable):
                 age = self._fmt_duration(time.monotonic() - d.created_at)
                 timer_info = f', timer: {d.trigger_time}(FIRED)' if d.trigger_time else ''
+                delay_info = ', ALREADY DELAYED ONCE — NO MORE DELAYS' if d.delayed else ''
                 lines.append(
                     f'{i}. "{d.goal}" [urgency {d.urgency}/10, active {age}, '
-                    f'escalated {d.escalation_count}x, source: {d.source}{timer_info}]'
+                    f'escalated {d.escalation_count}x, source: {d.source}{timer_info}{delay_info}]'
                 )
 
         # Recent actions
@@ -825,7 +915,7 @@ class AgentLoop:
             '  - {"command":"GOOGLE_IMAGES","args":["search term"]} — open Google Images for the thing they should be doing (e.g. "gym motivation", "healthy food", "sleeping peacefully")',
             '  - {"command":"OPEN","args":["app_name"]}',
             '  - {"command":"BROWSE","args":["url"]}',
-            '- create_directive: {"goal":"...","urgency":1-10} or null',
+            '- create_directive: {"goal":"...","urgency":1-10} or null — goal must be a DIRECT ACTION like "eat food", "go to sleep", "do homework". NEVER write "remind user to" or "get user to" — just the action itself.',
             '- complete_directive: index of directive to mark done, or null',
             '- adjust_urgency: {"index":0,"urgency":8} or null',
             '- next_check_seconds: 60-300, when to look again',
@@ -1168,7 +1258,7 @@ class AgentLoop:
             f"Other open windows: {window_titles}\n\n"
             f"THINK FIRST in <think>...</think> tags: Is this actually a distraction? Do they have tasks to do? "
             f"Are they just relaxing? What's the right call here?\n\n"
-            f"If YES, respond with JSON: {{\"speak\":\"what to say\",\"create_directive\":{{\"goal\":\"...\",\"urgency\":1-10}},\"next_check_seconds\":60}}\n"
+            f"If YES, respond with JSON: {{\"speak\":\"what to say\",\"create_directive\":{{\"goal\":\"direct action like 'eat food' or 'do homework' — NOT 'remind user to' or 'get user to'\",\"urgency\":1-10}},\"next_check_seconds\":60}}\n"
             f"If NO, respond with JSON: {{\"speak\":null,\"create_directive\":null,\"next_check_seconds\":300}}"
         )
 
@@ -1387,7 +1477,9 @@ class AgentLoop:
     def _check_timers(self) -> None:
         """Check if any time-triggered directives should fire now.
 
-        Fires 5 minutes early as a heads-up, then the directive becomes active.
+        Uses >= with a 10-minute window so ticks that skip the exact minute
+        still catch the timer.  Fires 5 minutes early as a heads-up, then
+        the directive becomes active at the actual trigger time.
         """
         now = datetime.now()
         now_minutes = now.hour * 60 + now.minute
@@ -1400,30 +1492,43 @@ class AgentLoop:
                 trigger_minutes = int(th) * 60 + int(tm)
             except (ValueError, AttributeError):
                 continue
-            # Fire 5 minutes early as a heads-up
-            fire_at = trigger_minutes - 5
-            if fire_at < 0:
-                fire_at += 24 * 60  # wrap around midnight
-            if now_minutes == fire_at or now_minutes == trigger_minutes:
+
+            # Heads-up fires 5 min early; actual fires at trigger time.
+            # Use a 10-minute window (>=) so we never miss a tick.
+            headsup_at = trigger_minutes - 5
+            if headsup_at < 0:
+                headsup_at += 24 * 60
+
+            def _in_window(target: int) -> bool:
+                """True if now_minutes is in [target, target+10) with midnight wrap."""
+                diff = (now_minutes - target) % (24 * 60)
+                return 0 <= diff < 10
+
+            if _in_window(trigger_minutes):
+                # Actual fire time (or past it within window)
                 d.triggered = True
-                d.urgency = 7  # Start at moderate-high, not nuclear
-                d.created_at = time.monotonic()  # Reset age so escalation starts NOW
-                is_early = (now_minutes == fire_at and fire_at != trigger_minutes)
-                if is_early:
-                    logger.info("Timer heads-up (5 min early): %s → %r", d.trigger_time, d.goal)
-                    self._speak(f"Hey! Heads up — in five minutes you gotta {d.goal}!")
-                    self._llm.inject_history(
-                        f"(Timer heads-up: {d.goal} in 5 minutes, at {d.trigger_time})",
-                        f"Hey! Heads up — in five minutes you gotta {d.goal}!",
-                    )
-                else:
-                    logger.info("Timer fired: %s → %r", d.trigger_time, d.goal)
-                    self._speak(f"Hey! It's {now.strftime('%I:%M %p')}! {d.goal}")
-                    self._llm.inject_history(
-                        f"(Timer alert: it's {d.trigger_time}. Goal: {d.goal})",
-                        f"Hey! It's {now.strftime('%I:%M %p')}! Time to {d.goal}!",
-                    )
+                d.urgency = 7
+                d.created_at = time.monotonic()
+                logger.info("Timer fired: %s -> %r", d.trigger_time, d.goal)
+                self._speak(f"Hey! It's {now.strftime('%I:%M %p')}! {d.goal}")
+                self._llm.inject_history(
+                    f"(Timer alert: it's {d.trigger_time}. Goal: {d.goal})",
+                    f"Hey! It's {now.strftime('%I:%M %p')}! Time to {d.goal}!",
+                )
                 self._log_action(f"Timer fired at {d.trigger_time}: {d.goal}")
+                self.save_directives()
+            elif _in_window(headsup_at) and headsup_at != trigger_minutes:
+                # Heads-up — mark triggered so we don't repeat
+                d.triggered = True
+                d.urgency = 7
+                d.created_at = time.monotonic()
+                logger.info("Timer heads-up (5 min early): %s -> %r", d.trigger_time, d.goal)
+                self._speak(f"Hey! Heads up — in five minutes you gotta {d.goal}!")
+                self._llm.inject_history(
+                    f"(Timer heads-up: {d.goal} in 5 minutes, at {d.trigger_time})",
+                    f"Hey! Heads up — in five minutes you gotta {d.goal}!",
+                )
+                self._log_action(f"Timer heads-up at {d.trigger_time}: {d.goal}")
                 self.save_directives()
 
     # ── Recurring routines ─────────────────────────────────────────────────
