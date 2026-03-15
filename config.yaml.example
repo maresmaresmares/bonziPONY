@@ -1,0 +1,99 @@
+wake_word:
+  language: "en"
+  # Per-character wake phrases (override defaults here, or leave empty to use built-in defaults)
+  # phrases:
+  #   rainbow_dash: ["hey dash", "hey dashie", "rainbow dash", "dash"]
+  #   twilight_sparkle: ["hey twilight", "twilight sparkle", "twilight", "hey twi"]
+  #   pinkie_pie: ["hey pinkie", "pinkie pie", "pinkie", "hey pinkie pie"]
+  #   rarity: ["hey rarity", "rarity"]
+  #   applejack: ["hey applejack", "applejack", "hey aj"]
+  #   fluttershy: ["hey fluttershy", "fluttershy", "hey flutter"]
+
+audio:
+  input_device_index: -1       # run: python scripts/list_audio_devices.py
+  output_device_index: -1
+  vad_aggressiveness: 2        # 0-3 (3 = most aggressive silence detection)
+  silence_duration_ms: 800
+
+whisper:
+  model: "base"                # tiny | base | small | medium
+  language: "en"
+
+llm:
+  provider: "openai"           # anthropic | openai | openrouter | deepseek | groq | ollama | lmstudio | llamacpp | koboldcpp | textgen | vllm | localai | any OpenAI-compatible
+  model: "gpt-4o"
+  api_key: "YOUR_API_KEY"      # or set BONZI_LLM_API_KEY env var
+  temperature: 0.85
+  max_tokens: 256
+  max_history_turns: 10
+  base_url: null               # auto-detected for known providers; set for custom endpoints (e.g. "http://localhost:1234/v1")
+  preset: "rainbow_dash"       # filename in presets/ folder (no .txt)
+
+elevenlabs:
+  api_key: "YOUR_ELEVENLABS_KEY"   # or set BONZI_ELEVENLABS_API_KEY env var
+  voice_id: "YOUR_VOICE_ID"       # or set BONZI_ELEVENLABS_VOICE_ID env var
+  model: "eleven_turbo_v2"
+  output_format: "pcm_22050"
+
+vision:
+  enabled: true
+  device_index: 0              # webcam index (0 = default camera)
+  screen_capture: true         # enable screenshot capture
+  screen_max_width: 1280       # downscale screenshots to this width
+
+conversation:
+  timeout_s: 60                # seconds to stay in conversation mode after speaking
+  listen_timeout_s: 4          # seconds to wait for user to START speaking in follow-up
+  random_speech_chance: 0.001  # 0.1% chance per second of unprompted speech (only if agent disabled)
+
+robot:
+  enabled: false
+  controller: "stub"           # stub | unitree_go2
+
+logging:
+  level: "INFO"
+  log_to_file: true
+  log_file: "logs/rainbow_dash.log"
+
+desktop_control:
+  enabled: true
+  allowed_apps: ["notepad", "calculator", "explorer", "chrome", "firefox"]
+  blocked_hotkeys: ["ctrl:alt:delete"]
+  click_enabled: true
+  type_enabled: true
+
+agent:
+  enabled: true
+  self_initiate: true               # can the pony start talking on her own?
+  max_directives: 3
+  base_check_interval_s: 120.0      # seconds between LLM calls when idle
+  min_check_interval_s: 30.0        # minimum interval at max urgency
+  self_initiate_interval_s: 300.0   # seconds between self-initiation checks
+  spontaneous_speech_min_s: 120.0   # min seconds between random check-ins
+  spontaneous_speech_max_s: 300.0   # max seconds between random check-ins
+  sustained_focus_threshold_s: 900.0
+  distraction_keywords: ["youtube", "reddit", "tiktok", "twitch", "twitter", "instagram", "facebook"]
+
+watch_mode:
+  enabled: false                        # off by default — say "watch with me" to activate
+  capture_interval: 2.5                 # seconds between screen captures
+  scene_change_threshold: 0.85          # CLIP similarity threshold for scene change detection
+  clip_model: "openai/clip-vit-base-patch32"
+  ocr_engine: "winocr"                  # "winocr" (Windows built-in) or "pytesseract"
+  subtitle_region_pct: 0.20             # bottom 20% of screen for subtitle OCR
+  use_gpu: false                        # use CUDA for CLIP if available
+
+desktop_pet:
+  enabled: true
+  scale: 2.0                  # sprite scale factor (originals are ~100px)
+  speech_bubble: true          # show text bubbles alongside TTS
+
+tts:
+  enabled: true
+  provider: "elevenlabs"       # "elevenlabs" or "openai_compatible"
+  # Settings below only apply when provider is "openai_compatible":
+  # base_url: "http://localhost:8069/v1"
+  # model: "ponyvoicetool"
+  # voice: "default"
+  # response_format: "pcm"
+  # sample_rate: 24000

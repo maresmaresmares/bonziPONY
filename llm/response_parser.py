@@ -1,0 +1,222 @@
+"""
+Parses LLM responses to extract [ACTION:XYZ], [DESKTOP:cmd:args],
+[DIRECTIVE:goal:urgency], [TIMER:...], and [ROUTINE:...] tags and clean spoken text.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+from robot.actions import RobotAction
+
+# Matches [ACTION:WALK_FORWARD], [action:sit], etc.
+_ACTION_PATTERN = re.compile(r"\[ACTION:([A-Z_]+)\]", re.IGNORECASE)
+
+# Matches [DESKTOP:CLICK:500:300], [DESKTOP:OPEN:notepad], etc.
+_DESKTOP_PATTERN = re.compile(r"\[DESKTOP:([^\]]+)\]", re.IGNORECASE)
+
+# Matches [DIRECTIVE:nag user to go to gym:7]
+_DIRECTIVE_PATTERN = re.compile(r"\[DIRECTIVE:([^\]]+)\]", re.IGNORECASE)
+
+# Matches [TIMER:21:00:close everything and tell user to sleep]
+_TIMER_PATTERN = re.compile(r"\[TIMER:([^\]]+)\]", re.IGNORECASE)
+
+# Matches [ROUTINE:on_wake:Brush teeth:5] or [ROUTINE:on_sleep:Brush teeth:5:8]
+_ROUTINE_PATTERN = re.compile(r"\[ROUTINE:([^\]]+)\]", re.IGNORECASE)
+
+# Matches [ENFORCE:15] — user is going to do the task, monitor for N minutes
+_ENFORCE_PATTERN = re.compile(r"\[ENFORCE:(\d+)\]", re.IGNORECASE)
+
+# Matches [DONE] or [DONE:shower] — user completed a task
+_DONE_PATTERN = re.compile(r"\[DONE(?::([^\]]*))?\]", re.IGNORECASE)
+
+# Matches [CONVO:END] or [CONVO:CONTINUE] — conversation flow signal
+_CONVO_PATTERN = re.compile(r"\[CONVO:\s*(END|CONTINUE)\s*\]", re.IGNORECASE)
+
+# Matches [PERSIST:600] — keep current action for N seconds
+_PERSIST_PATTERN = re.compile(r"\[PERSIST:\s*(\d+)\s*\]", re.IGNORECASE)
+
+# Matches [MOVETO:top_left] — move pony to screen region
+_MOVETO_PATTERN = re.compile(r"\[MOVETO:\s*([^\]]+?)\s*\]", re.IGNORECASE)
+
+# Catch-all: strip any remaining [TAG:...] bracket expressions the LLM may produce
+_LEFTOVER_TAG_PATTERN = re.compile(r"\[(?:MOVETO|PERSIST|ANIM|ACTION|CONVO|DESKTOP|DIRECTIVE|TIMER|ROUTINE|ENFORCE|DONE)\s*:[^\]]*\]", re.IGNORECASE)
+
+
+@dataclass
+class DesktopCommand:
+    command: str        # e.g. "CLICK"
+    args: list[str]     # e.g. ["500", "300"]
+
+
+@dataclass
+class DirectiveTag:
+    goal: str
+    urgency: int
+
+
+@dataclass
+class TimerTag:
+    time_str: str       # e.g. "21:00" or "9pm"
+    action: str         # e.g. "close everything and tell user to sleep"
+
+
+@dataclass
+class RoutineTag:
+    schedule: str       # "on_wake", "on_sleep", "daily", "interval"
+    goal: str
+    urgency: int
+    time: Optional[str] = None       # HH:MM for daily
+    hours: Optional[float] = None    # hours for on_sleep / interval
+
+
+@dataclass
+class ParsedResponse:
+    text: str                        # Speech text with tags stripped
+    actions: List[RobotAction] = field(default_factory=list)
+    desktop_commands: List[DesktopCommand] = field(default_factory=list)
+    directive: Optional[DirectiveTag] = None
+    timer: Optional[TimerTag] = None
+    routines: List[RoutineTag] = field(default_factory=list)
+    enforce_minutes: Optional[int] = None  # user is going to do the task, monitor for N min
+    done_directive: Optional[str] = None   # user completed a task — keyword or empty string
+    end_conversation: bool = False         # LLM signals conversation is over
+    persist_seconds: Optional[int] = None  # keep action animation for N seconds
+    moveto_region: Optional[str] = None    # move pony to screen region
+
+
+def parse_response(raw: str) -> ParsedResponse:
+    """Strip all tags from raw LLM text and extract structured data."""
+    actions: List[RobotAction] = []
+    desktop_commands: List[DesktopCommand] = []
+    directive: Optional[DirectiveTag] = None
+    timer: Optional[TimerTag] = None
+    routines: List[RoutineTag] = []
+
+    for match in _ACTION_PATTERN.finditer(raw):
+        tag = match.group(1).upper()
+        try:
+            actions.append(RobotAction[tag])
+        except KeyError:
+            pass  # Unknown action — ignore
+
+    for match in _DESKTOP_PATTERN.finditer(raw):
+        parts = match.group(1).split(":")
+        if parts:
+            desktop_commands.append(DesktopCommand(
+                command=parts[0].strip(),
+                args=[p.strip() for p in parts[1:]],
+            ))
+
+    # Parse first DIRECTIVE tag (only one allowed per response)
+    dir_match = _DIRECTIVE_PATTERN.search(raw)
+    if dir_match:
+        parts = dir_match.group(1).rsplit(":", 1)  # split from right — last segment is urgency
+        if len(parts) == 2:
+            try:
+                urgency = int(parts[1].strip())
+                directive = DirectiveTag(goal=parts[0].strip(), urgency=max(1, min(10, urgency)))
+            except ValueError:
+                # No valid urgency — treat entire string as goal with default urgency
+                directive = DirectiveTag(goal=dir_match.group(1).strip(), urgency=5)
+        else:
+            directive = DirectiveTag(goal=parts[0].strip(), urgency=5)
+
+    # Parse first TIMER tag
+    timer_match = _TIMER_PATTERN.search(raw)
+    if timer_match:
+        # Format: [TIMER:HH:MM:action] or [TIMER:9pm:action]
+        parts = timer_match.group(1).split(":", 2)  # split into at most 3 parts
+        if len(parts) >= 2:
+            # Check if first two parts form HH:MM
+            try:
+                int(parts[0])
+                int(parts[1])
+                # It's HH:MM:action format
+                time_str = f"{parts[0]}:{parts[1]}"
+                action = parts[2].strip() if len(parts) > 2 else "timer alert"
+            except ValueError:
+                # First part is like "9pm", rest is action
+                time_str = parts[0].strip()
+                action = ":".join(parts[1:]).strip() or "timer alert"
+            timer = TimerTag(time_str=time_str, action=action)
+
+    # Parse ALL ROUTINE tags (multiple allowed)
+    for match in _ROUTINE_PATTERN.finditer(raw):
+        parts = match.group(1).split(":")
+        if len(parts) >= 3:
+            schedule = parts[0].strip().lower()
+            goal = parts[1].strip()
+            try:
+                urgency = int(parts[2].strip())
+            except ValueError:
+                urgency = 5
+            urgency = max(1, min(10, urgency))
+
+            rt = RoutineTag(schedule=schedule, goal=goal, urgency=urgency)
+
+            # Parse optional extra field (time for daily, hours for on_sleep/interval)
+            if len(parts) >= 4:
+                extra = parts[3].strip()
+                if schedule == "daily":
+                    # Could be HH:MM (possibly split across parts[3] and parts[4])
+                    if len(parts) >= 5:
+                        rt.time = f"{parts[3].strip()}:{parts[4].strip()}"
+                    else:
+                        rt.time = extra
+                elif schedule in ("on_sleep", "interval"):
+                    try:
+                        rt.hours = float(extra)
+                    except ValueError:
+                        pass
+
+            routines.append(rt)
+
+    # Parse [ENFORCE:minutes] tag
+    enforce_minutes = None
+    enforce_match = _ENFORCE_PATTERN.search(raw)
+    if enforce_match:
+        enforce_minutes = int(enforce_match.group(1))
+
+    # Parse [DONE] or [DONE:keyword] tag
+    done_directive = None
+    done_match = _DONE_PATTERN.search(raw)
+    if done_match:
+        done_directive = (done_match.group(1) or "").strip()
+
+    # Parse [CONVO:END] / [CONVO:CONTINUE] tag
+    end_conversation = False
+    convo_match = _CONVO_PATTERN.search(raw)
+    if convo_match:
+        end_conversation = convo_match.group(1).upper() == "END"
+
+    # Parse [PERSIST:seconds] tag
+    persist_seconds = None
+    persist_match = _PERSIST_PATTERN.search(raw)
+    if persist_match:
+        persist_seconds = int(persist_match.group(1))
+
+    # Parse [MOVETO:region] tag
+    moveto_region = None
+    moveto_match = _MOVETO_PATTERN.search(raw)
+    if moveto_match:
+        moveto_region = moveto_match.group(1).strip().lower().replace(" ", "_")
+
+    clean_text = _ACTION_PATTERN.sub("", raw)
+    clean_text = _DESKTOP_PATTERN.sub("", clean_text)
+    clean_text = _DIRECTIVE_PATTERN.sub("", clean_text)
+    clean_text = _TIMER_PATTERN.sub("", clean_text)
+    clean_text = _ROUTINE_PATTERN.sub("", clean_text)
+    clean_text = _ENFORCE_PATTERN.sub("", clean_text)
+    clean_text = _DONE_PATTERN.sub("", clean_text)
+    clean_text = _CONVO_PATTERN.sub("", clean_text)
+    clean_text = _PERSIST_PATTERN.sub("", clean_text)
+    clean_text = _MOVETO_PATTERN.sub("", clean_text)
+    clean_text = _LEFTOVER_TAG_PATTERN.sub("", clean_text).strip()
+    return ParsedResponse(text=clean_text, actions=actions, desktop_commands=desktop_commands,
+                          directive=directive, timer=timer, routines=routines,
+                          enforce_minutes=enforce_minutes, done_directive=done_directive,
+                          end_conversation=end_conversation,
+                          persist_seconds=persist_seconds, moveto_region=moveto_region)
