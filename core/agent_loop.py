@@ -739,7 +739,7 @@ class AgentLoop:
             next_s = max(self._config.min_check_interval_s,
                          min(300.0, decision.next_check_seconds))
             self._next_check_at = time.monotonic() + next_s
-            print(f"[Agent] Decision: speak={bool(decision.speech)}, escalate={decision.escalate}, next check in {next_s:.0f}s", flush=True)
+            print(f"[Agent] Decision: speak={bool(decision.speak)}, actions={len(decision.actions)}, next check in {next_s:.0f}s", flush=True)
 
         except Exception as exc:
             print(f"[Agent] Tick failed: {exc}", flush=True)
