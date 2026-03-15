@@ -3,7 +3,7 @@ title bonziPONY Setup
 color 0d
 echo.
 echo  ============================================
-echo     bonziPONY v1.69 — One-Click Setup
+echo     bonziPONY v1.69 - One-Click Setup
 echo  ============================================
 echo.
 
@@ -24,58 +24,78 @@ if errorlevel 1 (
 for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
 echo  [OK] Python %PYVER% found.
 
+:: ── Install uv if not available ──────────────────────────────
+python -m uv --version >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo  Installing uv package manager...
+    python -m pip install uv --quiet
+)
+python -m uv --version >nul 2>&1
+if errorlevel 1 (
+    echo  [ERROR] Failed to install uv. Run: pip install uv
+    pause
+    exit /b 1
+)
+echo  [OK] uv ready.
+
 :: ── Create venv if it doesn't exist ──────────────────────────
 if not exist "venv\Scripts\python.exe" (
     echo.
     echo  Creating virtual environment...
-    python -m venv venv
+    python -m uv venv venv
     if errorlevel 1 (
-        echo  [ERROR] Failed to create venv. Continuing without it...
-        set PY=python
-        goto :install
+        echo  [ERROR] Failed to create venv.
+        pause
+        exit /b 1
     )
     echo  [OK] Virtual environment created.
 )
 
-:: ── Use venv python directly (more reliable than activate) ───
 set PY=venv\Scripts\python.exe
-set PIP=venv\Scripts\pip.exe
-echo  [OK] Using venv Python.
-goto :install
 
-:install
-
-:: ── Set PIP fallback if not using venv ───────────────────────
-if not defined PIP set PIP=pip
-
-:: ── Upgrade pip ──────────────────────────────────────────────
+:: ── Install dependencies (hashes enforced) ───────────────────
 echo.
-echo  Upgrading pip...
-%PY% -m pip install --upgrade pip --quiet
-echo  [OK] pip upgraded.
+echo  Installing dependencies with hash verification...
+echo.
+python -m uv pip install --require-hashes -r requirements-lock.txt --python venv\Scripts\python.exe
+if errorlevel 1 goto :lockfail
+goto :installdone
 
-:: ── Install dependencies ─────────────────────────────────────
+:lockfail
 echo.
-echo  Installing dependencies (this may take a while)...
-echo  If torch/transformers are slow, be patient — they're big.
+echo  [WARN] Lockfile install failed, trying loose requirements...
+python -m uv pip install -r requirements.txt --python venv\Scripts\python.exe
+if errorlevel 1 goto :installerror
+goto :installdone
+
+:installerror
 echo.
-%PIP% install -r requirements-lock.txt
-if errorlevel 1 (
-    echo.
-    echo  [WARN] Lockfile install had issues, trying loose requirements...
-    %PIP% install -r requirements.txt
-)
+echo  [ERROR] Dependency install failed. Check the errors above.
+echo.
+pause
+exit /b 1
+
+:installdone
 echo.
 echo  [OK] Dependencies installed.
+
+:: ── Quick sanity check ───────────────────────────────────────
+%PY% -c "import yaml" >nul 2>&1
+if errorlevel 1 (
+    echo  [ERROR] Core dependency missing. Install may have failed.
+    pause
+    exit /b 1
+)
 
 :: ── Copy config if needed ────────────────────────────────────
 if not exist "config.yaml" (
     echo.
-    echo  No config.yaml found — copying from example...
+    echo  No config.yaml found, copying from example...
     copy config.yaml.example config.yaml >nul
     echo  [OK] config.yaml created.
     echo.
-    echo  !! IMPORTANT: Edit config.yaml with your API keys !!
+    echo  IMPORTANT: Edit config.yaml with your API keys
     echo  Or use the right-click menu after launch to set them.
     echo.
 )
@@ -92,7 +112,7 @@ echo     Setup complete! Launching bonziPONY...
 echo  ============================================
 echo.
 echo  Right-click the pony for settings.
-echo  Double-click or say the wake word to chat.
+echo  Double-click the pony to type a message.
 echo  Close this window to kill the pony.
 echo.
 

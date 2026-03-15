@@ -29,6 +29,9 @@ _ROUTINE_PATTERN = re.compile(r"\[ROUTINE:([^\]]+)\]", re.IGNORECASE)
 # Matches [ENFORCE:15] — user is going to do the task, monitor for N minutes
 _ENFORCE_PATTERN = re.compile(r"\[ENFORCE:(\d+)\]", re.IGNORECASE)
 
+# Matches [DELAY:60] or [DELAY:30:keyword] — user negotiated a delay
+_DELAY_PATTERN = re.compile(r"\[DELAY:(\d+)(?::([^\]]*))?\]", re.IGNORECASE)
+
 # Matches [DONE] or [DONE:shower] — user completed a task
 _DONE_PATTERN = re.compile(r"\[DONE(?::([^\]]*))?\]", re.IGNORECASE)
 
@@ -42,7 +45,7 @@ _PERSIST_PATTERN = re.compile(r"\[PERSIST:\s*(\d+)\s*\]", re.IGNORECASE)
 _MOVETO_PATTERN = re.compile(r"\[MOVETO:\s*([^\]]+?)\s*\]", re.IGNORECASE)
 
 # Catch-all: strip any remaining [TAG:...] bracket expressions the LLM may produce
-_LEFTOVER_TAG_PATTERN = re.compile(r"\[(?:MOVETO|PERSIST|ANIM|ACTION|CONVO|DESKTOP|DIRECTIVE|TIMER|ROUTINE|ENFORCE|DONE)\s*:[^\]]*\]", re.IGNORECASE)
+_LEFTOVER_TAG_PATTERN = re.compile(r"\[(?:MOVETO|PERSIST|ANIM|ACTION|CONVO|DESKTOP|DIRECTIVE|TIMER|ROUTINE|ENFORCE|DONE|DELAY)\s*:[^\]]*\]", re.IGNORECASE)
 
 
 @dataclass
@@ -82,6 +85,8 @@ class ParsedResponse:
     routines: List[RoutineTag] = field(default_factory=list)
     enforce_minutes: Optional[int] = None  # user is going to do the task, monitor for N min
     done_directive: Optional[str] = None   # user completed a task — keyword or empty string
+    delay_minutes: Optional[int] = None    # user negotiated a delay — reschedule in N min
+    delay_keyword: str = ""                # optional keyword to match directive for delay
     end_conversation: bool = False         # LLM signals conversation is over
     persist_seconds: Optional[int] = None  # keep action animation for N seconds
     moveto_region: Optional[str] = None    # move pony to screen region
@@ -180,6 +185,14 @@ def parse_response(raw: str) -> ParsedResponse:
     if enforce_match:
         enforce_minutes = int(enforce_match.group(1))
 
+    # Parse [DELAY:minutes] or [DELAY:minutes:keyword] tag
+    delay_minutes = None
+    delay_keyword = ""
+    delay_match = _DELAY_PATTERN.search(raw)
+    if delay_match:
+        delay_minutes = int(delay_match.group(1))
+        delay_keyword = (delay_match.group(2) or "").strip()
+
     # Parse [DONE] or [DONE:keyword] tag
     done_directive = None
     done_match = _DONE_PATTERN.search(raw)
@@ -210,6 +223,7 @@ def parse_response(raw: str) -> ParsedResponse:
     clean_text = _TIMER_PATTERN.sub("", clean_text)
     clean_text = _ROUTINE_PATTERN.sub("", clean_text)
     clean_text = _ENFORCE_PATTERN.sub("", clean_text)
+    clean_text = _DELAY_PATTERN.sub("", clean_text)
     clean_text = _DONE_PATTERN.sub("", clean_text)
     clean_text = _CONVO_PATTERN.sub("", clean_text)
     clean_text = _PERSIST_PATTERN.sub("", clean_text)
@@ -218,5 +232,6 @@ def parse_response(raw: str) -> ParsedResponse:
     return ParsedResponse(text=clean_text, actions=actions, desktop_commands=desktop_commands,
                           directive=directive, timer=timer, routines=routines,
                           enforce_minutes=enforce_minutes, done_directive=done_directive,
+                          delay_minutes=delay_minutes, delay_keyword=delay_keyword,
                           end_conversation=end_conversation,
                           persist_seconds=persist_seconds, moveto_region=moveto_region)

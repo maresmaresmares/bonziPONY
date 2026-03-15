@@ -74,6 +74,18 @@ class DesktopController:
         """Check if the given HWND is the pet window itself."""
         return self._pet_hwnd != 0 and hwnd == self._pet_hwnd
 
+    @staticmethod
+    def _is_own_console(hwnd: int) -> bool:
+        """Check if the window belongs to our own process (the CMD/console running main.py)."""
+        try:
+            import os
+            import ctypes
+            pid = ctypes.c_ulong()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            return pid.value == os.getpid()
+        except Exception:
+            return False
+
     def _enforce_cooldown(self) -> None:
         """Wait if we're within cooldown period of last command."""
         elapsed = time.monotonic() - self._last_command_time
@@ -107,6 +119,9 @@ class DesktopController:
             return
         if self._is_pet_window(hwnd):
             logger.info("Skipping window action — foreground is pet window.")
+            return
+        if self._is_own_console(hwnd):
+            logger.info("Skipping window action — foreground is our own console.")
             return
 
         try:
@@ -163,6 +178,9 @@ class DesktopController:
         if self._is_pet_window(hwnd):
             logger.info("Skipping close — matched window is pet window.")
             return False
+        if self._is_own_console(hwnd):
+            logger.info("Skipping close — matched window is our own console.")
+            return False
         try:
             import win32gui
             import win32con
@@ -181,6 +199,9 @@ class DesktopController:
             return False
         if self._is_pet_window(hwnd):
             logger.info("Skipping minimize — matched window is pet window.")
+            return False
+        if self._is_own_console(hwnd):
+            logger.info("Skipping minimize — matched window is our own console.")
             return False
         try:
             import win32gui
@@ -207,6 +228,8 @@ class DesktopController:
             if not win32gui.IsWindowVisible(hwnd):
                 return True
             if self._is_pet_window(hwnd):
+                return True
+            if self._is_own_console(hwnd):
                 return True
             title = win32gui.GetWindowText(hwnd)
             if not title or not title.strip():
@@ -415,7 +438,7 @@ class DesktopController:
 
         if hwnd == 0:
             hwnd = self._get_foreground_hwnd()
-        if hwnd == 0 or self._is_pet_window(hwnd):
+        if hwnd == 0 or self._is_pet_window(hwnd) or self._is_own_console(hwnd):
             return
         if not self._is_prominent(hwnd):
             logger.info("Skipping shake — window HWND=%d is not maximized/prominent.", hwnd)
@@ -457,6 +480,8 @@ class DesktopController:
             if not win32gui.IsWindowVisible(hwnd):
                 return True
             if self._is_pet_window(hwnd):
+                return True
+            if self._is_own_console(hwnd):
                 return True
             title = win32gui.GetWindowText(hwnd)
             if not title or not title.strip():
@@ -538,6 +563,8 @@ class DesktopController:
         if hwnd is None:
             return False
         if self._is_pet_window(hwnd):
+            return False
+        if self._is_own_console(hwnd):
             return False
         if not self._is_prominent(hwnd):
             logger.info("Skipping shake — window %r is not maximized/prominent.", title_substring)

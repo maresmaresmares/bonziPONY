@@ -418,11 +418,17 @@ def main() -> None:
     # ── Double-click activation ──────────────────────────────────────────────
 
     activation_event = threading.Event()
+    _pending_text_message: list[str] = []  # thread-safe via GIL; checked in pipeline loop
 
     def _on_conversation_requested() -> None:
         activation_event.set()
 
+    def _on_text_message(text: str) -> None:
+        _pending_text_message.append(text)
+        activation_event.set()  # wake the pipeline loop
+
     pet_window.conversation_requested.connect(_on_conversation_requested)
+    pet_window.text_message.connect(_on_text_message)
 
     # ── Pipeline thread ──────────────────────────────────────────────────────
 
@@ -446,10 +452,20 @@ def main() -> None:
                 if _shutdown_requested.is_set():
                     break
 
-                # Check for double-click activation
+                # Check for double-click activation or typed message
                 if keyword_index is None and activation_event.is_set():
                     activation_event.clear()
-                    keyword_index = 0  # Treat as wake word trigger
+                    # Check if there's a typed message waiting
+                    if _pending_text_message:
+                        typed = _pending_text_message.pop(0)
+                        detector.pause()
+                        try:
+                            pipeline.run_text_conversation(typed)
+                        finally:
+                            if not _shutdown_requested.is_set():
+                                detector.resume()
+                        continue
+                    keyword_index = 0  # Treat as voice conversation trigger
 
                 if keyword_index is None:
                     # Agent loop handles all autonomous behavior (directives, spontaneous speech, screen monitoring)

@@ -24,6 +24,7 @@ class PetWindow(QWidget):
     """Main transparent always-on-top window for the desktop pet."""
 
     conversation_requested = pyqtSignal()
+    text_message = pyqtSignal(str)  # Emitted when user types a message via double-click
     idle_chatter = pyqtSignal()  # Emitted randomly to trigger a quip bubble
 
     def __init__(
@@ -498,7 +499,20 @@ class PetWindow(QWidget):
 
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
-            self.conversation_requested.emit()
+            from PyQt5.QtWidgets import QInputDialog, QLineEdit
+            text, ok = QInputDialog.getText(
+                self, "Talk to the pony",
+                "Type your message (or cancel for voice):",
+                QLineEdit.Normal, "",
+            )
+            if ok and text.strip():
+                self.text_message.emit(text.strip())
+            elif ok:
+                # User hit OK with empty text — treat as voice conversation
+                self.conversation_requested.emit()
+            else:
+                # User cancelled — start voice conversation
+                self.conversation_requested.emit()
 
     def set_menu_builder(self, builder) -> None:
         """Set the context menu builder (called from main.py after all components are ready)."""
