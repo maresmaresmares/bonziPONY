@@ -1,0 +1,401 @@
+# Desktop Ponies v1.69
+
+An AI-powered desktop companion that puts a fully autonomous, voice-interactive pony on your Windows desktop. It listens for wake words, speaks back through TTS, monitors your screen, nags you about your responsibilities, and controls your desktop — all while trotting around as an animated sprite.
+
+This is not a chatbot with a pony skin. It's a persistent agent that runs autonomously between conversations, tracks your tasks, enforces accountability, reacts to what's on your screen, and has opinions about your life choices.
+
+## What it does
+
+**Voice pipeline.** Say the character's name → it listens → transcribes with Google Web Speech API → sends to LLM → speaks the response through ElevenLabs TTS → shows a speech bubble on screen. Full duplex conversation with configurable timeout. Double-click the sprite to start a conversation without a wake word.
+
+**Autonomous agent loop.** Between conversations, the pony monitors your screen and your behavior. It creates directives (persistent goals) when you mention things you need to do — "I'm hungry", "I should shower", "I have homework" — and will nag you with escalating urgency until you do them. Urgency 1-3 is verbal nagging. 4-5 shakes your windows. 6+ starts closing your distractions and messing with your mouse.
+
+**Enforcement mode.** When you say you're going to do something ("fine I'll go shower"), it asks how long you'll be, then monitors your mouse and keyboard. If you touch the computer while you're supposed to be away, it calls you out immediately.
+
+**Directives, timers, and routines.** The LLM generates structured tags that the agent loop parses and executes:
+- `[DIRECTIVE:eat something:5]` — persistent goal at urgency 5
+- `[TIMER:21:00:time for bed]` — wall-clock triggered action
+- `[ROUTINE:on_wake:drink water:4]` — fires every time you wake up
+- `[ROUTINE:interval:stretch:3:2]` — fires every 2 hours
+- `[ENFORCE:15]` — monitor for 15 minutes, verify task completion
+- `[DONE:shower]` — mark a directive as completed
+
+**Desktop control.** The pony can interact with your desktop through the LLM's output tags:
+- Window management: close, minimize, maximize, snap left/right
+- Volume control: up, down, mute
+- Click at coordinates, type text, press hotkeys
+- Open applications, browse URLs, scroll
+- Security: configurable allowlist for apps, blocklist for dangerous hotkeys
+
+**Vision.** Optional screen capture and webcam support. The pony can describe what's on your screen and react to it. Watch mode uses local CLIP inference + OCR to detect scene changes and read subtitles — zero API cost for the visual analysis.
+
+**Desktop pet.** 200+ characters from the Desktop Ponies sprite library. Animated GIF behaviors parsed from pony.ini files — walking, flying, sleeping, hovering, and dozens more per character. Effects rendering, configurable scale, speech bubbles, right-click context menu for everything.
+
+**Mane 6 hotswap.** Switch between Rainbow Dash, Twilight Sparkle, Pinkie Pie, Rarity, Applejack, and Fluttershy at runtime from the right-click menu. Each character has their own personality preset, wake phrases, diary, and sprite set. Swap is instant — new sprites load, LLM history resets, wake word detection switches to the new character's phrases.
+
+**User profile and memory.** The pony builds a persistent profile of the user over time — name, age, location, job, interests, personality traits, whatever comes up naturally in conversation. It also tracks ongoing events (upcoming interviews, exams, deadlines, goals) and follows up on them later. After every conversation, new facts are extracted and saved to `memory/user_profile.txt` and `memory/user_events.txt`. Stale events are pruned on startup. The profile is injected into every prompt so the character genuinely remembers who you are across sessions.
+
+**Any LLM provider.** Anthropic Claude (native SDK), OpenAI, OpenRouter, DeepSeek, Groq, and any OpenAI-compatible API. Local model support for Ollama, LM Studio, llama.cpp, KoboldCPP, text-generation-webui, vLLM, and LocalAI. Bring your own endpoint with `base_url`.
+
+## Architecture
+
+```
+main.py                          Entry point, wires everything together
+├── core/
+│   ├── pipeline.py              State machine: IDLE → ACKNOWLEDGE → LISTEN → THINK → SPEAK
+│   ├── agent_loop.py            Autonomous behavior engine (directives, enforcement, screen monitoring)
+│   ├── routines.py              Recurring reminder scheduler
+│   ├── screen_monitor.py        Win32 window tracking (free, no API calls)
+│   ├── memory.py                Session summaries persisted across restarts
+│   ├── diary.py                 Per-character diary entries
+│   ├── user_profile.py          Persistent user profile + event tracking
+│   ├── config_loader.py         YAML → typed dataclasses
+│   └── audio_utils.py           Audio utilities
+├── llm/
+│   ├── base.py                  Abstract LLMProvider interface
+│   ├── factory.py               Provider routing and instantiation
+│   ├── anthropic_provider.py    Anthropic Claude (native SDK, retry logic)
+│   ├── openai_provider.py       OpenAI-compatible (12+ providers, retry logic, vision fallback)
+│   ├── prompt.py                Preset loading, character identity
+│   └── response_parser.py       Tag extraction from LLM output
+├── desktop_pet/
+│   ├── pet_window.py            PyQt5 transparent frameless window, roaming, animation
+│   ├── pet_controller.py        Qt signal bridge for thread-safe GUI updates
+│   ├── sprite_manager.py        GIF loading, caching, scaling, dynamic sprite mapping
+│   ├── behavior_manager.py      pony.ini parsing, behavior selection
+│   ├── effect_renderer.py       Visual effects overlay
+│   ├── speech_bubble.py         Text bubble widget
+│   └── context_menu.py          Right-click menu (character switch, settings, directives)
+├── wake_word/
+│   └── detector.py              Google STT keyword spotting with per-character phrases
+├── stt/
+│   ├── transcriber.py           Speech-to-text (Google Web Speech API)
+│   └── voice_filter.py          Speaker verification (resemblyzer)
+├── tts/
+│   └── elevenlabs_tts.py        ElevenLabs TTS → raw PCM → sounddevice playback
+├── vision/
+│   ├── camera.py                Webcam capture
+│   ├── screen.py                Screenshot capture (mss)
+│   └── watch_mode.py            CLIP scene classification + OCR subtitle extraction
+├── robot/
+│   ├── desktop_controller.py    Window ops, volume, keyboard/mouse automation
+│   └── actions.py               RobotAction enum
+├── presets/                     Character system prompts (one .txt per character)
+├── Ponies/                      200+ sprite directories (pony.ini + GIF animations)
+└── config.yaml                  All configuration
+```
+
+## Setup
+
+### Requirements
+
+- Windows 10/11
+- Python 3.9+
+- A microphone
+- An LLM API key (Anthropic, OpenAI, or any supported provider)
+- An ElevenLabs API key (for TTS)
+
+### Install
+
+```bash
+git clone <repo-url>
+cd Desktop.Ponies.v1.69/__UPDATED_FILES__
+pip install -r requirements.txt
+```
+
+### Configure
+
+Copy `config.yaml.example` to `config.yaml` and fill in your API keys:
+
+```yaml
+llm:
+  provider: "anthropic"       # or openai, openrouter, ollama, lmstudio, etc.
+  model: "claude-sonnet-4-6"
+  api_key: "your-api-key"
+  preset: "rainbow_dash"      # character preset (filename in presets/, no .txt)
+
+elevenlabs:
+  api_key: "your-elevenlabs-key"
+  voice_id: "your-voice-id"
+```
+
+Find your audio devices:
+
+```bash
+python scripts/list_audio_devices.py
+```
+
+Then set `audio.input_device_index` and `audio.output_device_index` in config.yaml. Use `-1` for system defaults.
+
+### Run
+
+```bash
+python main.py
+```
+
+Or with a custom config path:
+
+```bash
+python main.py --config path/to/config.yaml
+```
+
+### Optional: voice enrollment
+
+If you want the pony to only respond to your voice (reject other speakers):
+
+```bash
+python scripts/enroll_voice.py
+```
+
+This creates a voice profile in `voice_profile/speaker_embedding.npy`.
+
+## Configuration reference
+
+### `wake_word`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `language` | `"en"` | Recognition language |
+| `phrases` | `{}` | Per-character phrase overrides. Defaults are built in for all Mane 6. |
+
+### `audio`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `input_device_index` | `-1` | Microphone index (`-1` = system default) |
+| `output_device_index` | `-1` | Speaker index (`-1` = system default) |
+| `vad_aggressiveness` | `2` | Voice activity detection sensitivity (0-3, higher = more aggressive) |
+| `silence_duration_ms` | `800` | Silence duration to end recording |
+
+### `llm`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `provider` | `"anthropic"` | LLM provider name |
+| `model` | `"claude-sonnet-4-6"` | Model identifier |
+| `api_key` | — | API key (leave empty for local models) |
+| `temperature` | `0.85` | Response randomness (0.0–1.0) |
+| `max_tokens` | `256` | Max response length |
+| `max_history_turns` | `50` | Conversation history depth |
+| `base_url` | `null` | Custom API endpoint (auto-detected for known providers) |
+| `preset` | `"rainbow_dash"` | Character preset filename (without `.txt`) |
+
+**Supported providers:** `anthropic`, `openai`, `openrouter`, `deepseek`, `groq`, `ollama`, `lmstudio`, `llamacpp`, `koboldcpp`, `textgen`, `vllm`, `localai`, or any OpenAI-compatible endpoint via `base_url`.
+
+### `elevenlabs`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `api_key` | — | ElevenLabs API key |
+| `voice_id` | — | Voice ID |
+| `model` | `"eleven_multilingual_v2"` | TTS model |
+| `output_format` | `"pcm_22050"` | Audio format (determines sample rate) |
+
+### `vision`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `true` | Enable vision capabilities |
+| `device_index` | `0` | Webcam index |
+| `screen_capture` | `true` | Enable screenshot capture |
+| `screen_max_width` | `1280` | Downscale screenshots to this width |
+
+### `conversation`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `timeout_s` | `10` | Seconds to stay in conversation mode after speaking |
+| `listen_timeout_s` | `15` | Seconds to wait for follow-up speech |
+
+### `desktop_control`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `true` | Enable desktop automation |
+| `allowed_apps` | `[notepad, calculator, explorer, chrome, firefox]` | Apps the pony can open |
+| `blocked_hotkeys` | `["ctrl:alt:delete"]` | Blocked keyboard shortcuts |
+| `click_enabled` | `true` | Allow mouse clicks |
+| `type_enabled` | `true` | Allow keyboard input |
+
+### `agent`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `true` | Enable autonomous agent |
+| `self_initiate` | `true` | Allow unprompted speech |
+| `max_directives` | `999` | Max concurrent tracked goals |
+| `base_check_interval_s` | `300` | Seconds between idle checks |
+| `min_check_interval_s` | `30` | Minimum interval at max urgency |
+| `self_initiate_interval_s` | `600` | Seconds between autonomous check-ins |
+| `spontaneous_speech_min_s` | `120` | Minimum seconds between random commentary |
+| `spontaneous_speech_max_s` | `300` | Maximum seconds between random commentary |
+| `sustained_focus_threshold_s` | `900` | Flag sustained app focus after this many seconds |
+| `distraction_keywords` | `[youtube, reddit, tiktok, ...]` | Window titles that count as distractions |
+
+### `watch_mode`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Watch mode (activate by voice: "watch with me") |
+| `capture_interval` | `2.5` | Seconds between screen captures |
+| `scene_change_threshold` | `0.85` | CLIP similarity threshold for scene changes |
+| `clip_model` | `"openai/clip-vit-base-patch32"` | CLIP model for scene classification |
+| `ocr_engine` | `"winocr"` | OCR engine (`winocr` or `pytesseract`) |
+| `subtitle_region_pct` | `0.20` | Bottom % of screen for subtitle OCR |
+| `use_gpu` | `false` | Use CUDA for CLIP inference |
+
+### `desktop_pet`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `true` | Show the desktop pet |
+| `scale` | `2.0` | Sprite size multiplier |
+| `speech_bubble` | `true` | Show text bubbles with TTS |
+
+## Preset system
+
+Character presets live in `presets/`. Each `.txt` file defines the character's entire personality, speech patterns, and behavior rules for the LLM. The preset is injected as the system prompt.
+
+**Included presets:**
+
+| Preset | File | Species |
+|--------|------|---------|
+| Rainbow Dash | `rainbow_dash.txt` | Pegasus |
+| Twilight Sparkle | `twilight_sparkle.txt` | Alicorn |
+| Pinkie Pie | `pinkie_pie.txt` | Earth pony |
+| Rarity | `rarity.txt` | Unicorn |
+| Applejack | `applejack.txt` | Earth pony |
+| Fluttershy | `fluttershy.txt` | Pegasus |
+
+Every preset contains:
+- Voice rules (TTS-aware output — spoken words only, no stage directions)
+- Anti-slop rules (explicit blocklist of AI-sounding patterns)
+- Character personality and speech examples
+- Equine anatomy rules (species-correct body references)
+- Full tag documentation (actions, directives, timers, routines, enforcement, desktop commands)
+
+**Custom presets.** Drop a `.txt` file in `presets/`, set `llm.preset` to the filename (without extension), and make sure there's a matching sprite directory in `Ponies/` with the title-cased name. The preset slug `my_oc` maps to `Ponies/My Oc/`.
+
+## LLM tag system
+
+The LLM generates structured tags inline with its spoken response. The response parser strips them before TTS and routes them to the appropriate handler.
+
+```
+Spoken text goes here. [DIRECTIVE:do homework:6] [CONVO:CONTINUE]
+```
+
+| Tag | Purpose | Example |
+|-----|---------|---------|
+| `[ACTION:X]` | Sprite animation | `[ACTION:WALK_FORWARD]`, `[ACTION:SIT]`, `[ACTION:SPIN]` |
+| `[DIRECTIVE:goal:urgency]` | Create persistent goal | `[DIRECTIVE:eat food:5]` |
+| `[TIMER:time:action]` | Schedule action at wall-clock time | `[TIMER:21:00:bedtime]` |
+| `[ROUTINE:type:goal:urgency:param]` | Recurring reminder | `[ROUTINE:daily:stretch:3:14:00]` |
+| `[DONE]` / `[DONE:keyword]` | Complete a directive | `[DONE:shower]` |
+| `[ENFORCE:minutes]` | Monitor task completion | `[ENFORCE:15]` |
+| `[CONVO:CONTINUE]` / `[CONVO:END]` | Conversation flow control | — |
+| `[ACTION:CLOSE_WINDOW]` | Window management | Also: `MINIMIZE`, `MAXIMIZE`, `SNAP_LEFT/RIGHT` |
+| `[ACTION:VOLUME_UP/DOWN/MUTE]` | Volume control | — |
+| `[DESKTOP:CLICK:x:y]` | Click at coordinates | `[DESKTOP:CLICK:500:300]` |
+| `[DESKTOP:TYPE:text]` | Type text | `[DESKTOP:TYPE:hello world]` |
+| `[DESKTOP:HOTKEY:k1:k2]` | Press shortcut | `[DESKTOP:HOTKEY:ctrl:s]` |
+| `[DESKTOP:OPEN:app]` | Open application | `[DESKTOP:OPEN:notepad]` |
+| `[DESKTOP:BROWSE:url]` | Open URL | `[DESKTOP:BROWSE:youtube.com]` |
+| `[DESKTOP:SCROLL:n]` | Scroll | `[DESKTOP:SCROLL:-3]` (down) |
+
+## Escalation behavior
+
+When the pony has active directives and the user ignores them, urgency increases over time:
+
+| Urgency | Behavior |
+|---------|----------|
+| 1–3 | Verbal nagging |
+| 4–5 | Shake distracting windows |
+| 6 | Shake windows + pause media (YouTube, Spotify) or minimize |
+| 7 | Shake + mess with mouse cursor |
+| 8+ | Nuclear — shake everything, hijack mouse, close windows |
+
+The pony always shakes before minimizing or closing. Escalation is graduated, not instant.
+
+## Using local models
+
+Set `provider` to your local server and leave `api_key` empty:
+
+```yaml
+llm:
+  provider: "ollama"          # or lmstudio, llamacpp, koboldcpp, textgen, vllm, localai
+  model: "llama3"             # whatever model you have loaded
+  api_key: ""
+  base_url: null              # auto-detected, or set manually
+```
+
+For a custom server not in the known list:
+
+```yaml
+llm:
+  provider: "custom"
+  model: "my-model"
+  api_key: ""
+  base_url: "http://192.168.1.100:8080/v1"
+```
+
+The only requirement is that the endpoint speaks the OpenAI chat completions format (`POST /chat/completions`).
+
+Vision features (`describe_image`, `describe_screen`) gracefully degrade — if the model doesn't support image inputs, vision calls return `None` and the pony continues without visual awareness.
+
+## Context menu
+
+Right-click the pony sprite to access:
+
+- **Directives** — view, add, or clear active goals
+- **Character** — hotswap between Mane 6 (instant sprite + personality switch)
+- **Scale** — resize the sprite (0.5x–4.0x)
+- **Watch mode** — toggle screen watching (also voice-activated: "watch with me")
+- **Diary** — open the character's diary in Notepad
+- **Audio devices** — switch mic/speaker
+- **Quit**
+
+## Dependencies
+
+```
+PyQt5>=5.15          # Desktop window
+Pillow>=10.0         # Sprite processing
+SpeechRecognition    # Wake word + STT
+pyaudio              # Microphone input
+elevenlabs>=1.0      # TTS
+sounddevice          # Audio playback
+anthropic>=0.20      # Claude API
+openai>=1.14         # OpenAI-compatible APIs
+opencv-python>=4.8   # Image processing
+mss>=9.0             # Screenshot capture
+pyautogui            # Desktop automation
+pygetwindow          # Window management
+pywin32>=306         # Win32 API
+PyYAML>=6.0          # Config parsing
+numpy>=1.24          # Numerical ops
+```
+
+**Optional (for watch mode):**
+```
+transformers>=4.30   # CLIP model
+torch>=2.0           # PyTorch
+winocr               # Windows OCR
+```
+
+**Optional (for speaker verification):**
+```
+resemblyzer          # Voice embeddings
+scipy                # Signal processing
+librosa              # Audio features
+```
+
+## File structure conventions
+
+- Preset slug `rainbow_dash` → sprite directory `Ponies/Rainbow Dash/` (underscore to title case)
+- Diary files: `diary/{preset_slug}_diary.txt`
+- Session memory: `memory/sessions.txt`
+- Persistent state: `directives.json`, `routines.json`, `wake_state.json`
+- Logs: `logs/rainbow_dash.log`
+
+## Platform
+
+Windows only. Depends on `pywin32` for window manipulation, `winocr` for OCR, and `win32gui` for idle time detection. The desktop control and screen monitoring subsystems use Win32 APIs directly.
