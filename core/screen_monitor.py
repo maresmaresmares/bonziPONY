@@ -64,16 +64,15 @@ def _get_exe_name(hwnd: int) -> Optional[str]:
 
 
 def _is_fullscreen(hwnd: int) -> bool:
-    """Check if window covers the full primary monitor."""
+    """Check if window covers the full monitor it's on."""
     try:
         import win32gui
+        from core.monitor_utils import get_monitor_screen_rect_for_hwnd
         rect = win32gui.GetWindowRect(hwnd)
-        # Get primary monitor size
-        w = ctypes.windll.user32.GetSystemMetrics(0)  # SM_CXSCREEN
-        h = ctypes.windll.user32.GetSystemMetrics(1)  # SM_CYSCREEN
-        # Window covers full screen (or larger, for borderless)
-        return (rect[0] <= 0 and rect[1] <= 0
-                and rect[2] >= w and rect[3] >= h)
+        mon = get_monitor_screen_rect_for_hwnd(hwnd)
+        # Window covers the full monitor (or larger, for borderless)
+        return (rect[0] <= mon.left and rect[1] <= mon.top
+                and rect[2] >= mon.right and rect[3] >= mon.bottom)
     except Exception:
         return False
 

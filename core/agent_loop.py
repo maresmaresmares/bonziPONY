@@ -663,9 +663,10 @@ class AgentLoop:
             try:
                 import ctypes
                 import ctypes.wintypes
-                # Lock cursor to a 1x1 box at center of screen
-                sw, sh = self._desktop._pyautogui.size()
-                cx, cy = sw // 2, sh // 2
+                # Lock cursor to a 1x1 box at center of the pony's monitor
+                mon = self._desktop._get_monitor_rect()
+                cx = mon.left + mon.width // 2
+                cy = mon.top + mon.height // 2
                 rect = ctypes.wintypes.RECT(cx, cy, cx + 1, cy + 1)
                 ctypes.windll.user32.ClipCursor(ctypes.byref(rect))
                 cursor_locked = True
@@ -915,6 +916,7 @@ class AgentLoop:
             '  - {"command":"GOOGLE_IMAGES","args":["search term"]} — open Google Images for the thing they should be doing (e.g. "gym motivation", "healthy food", "sleeping peacefully")',
             '  - {"command":"OPEN","args":["app_name"]}',
             '  - {"command":"BROWSE","args":["url"]}',
+            '  - {"command":"WRITE_NOTEPAD","args":["content with \\n for newlines"]} — open Notepad and write content (lists, routines, plans, notes)',
             '- create_directive: {"goal":"...","urgency":1-10} or null — goal must be a DIRECT ACTION like "eat food", "go to sleep", "do homework". NEVER write "remind user to" or "get user to" — just the action itself.',
             '- complete_directive: index of directive to mark done, or null',
             '- adjust_urgency: {"index":0,"urgency":8} or null',

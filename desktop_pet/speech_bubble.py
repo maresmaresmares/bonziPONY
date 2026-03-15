@@ -235,7 +235,10 @@ class SpeechBubble(QWidget):
         by = self._anchor_y - h - gap
 
         # Clamp to screen edges but never flip below
-        screen = QApplication.primaryScreen()
+        from PyQt5.QtCore import QPoint
+        screen = QApplication.screenAt(QPoint(self._anchor_x, self._anchor_y))
+        if screen is None:
+            screen = QApplication.primaryScreen()
         if screen:
             geom = screen.availableGeometry()
             by = max(geom.top(), by)

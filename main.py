@@ -205,6 +205,11 @@ def main() -> None:
     # Create pet window
     pet_window = PetWindow(sprite_manager, behavior_manager, effect_renderer)
 
+    # Wire up pony locator for screen capture (captures the correct monitor)
+    if screen:
+        screen.set_pony_locator(lambda: (pet_window.x() + pet_window.width() // 2,
+                                          pet_window.y() + pet_window.height() // 2))
+
     # Desktop controller (needs pet_window HWND to avoid self-targeting)
     desktop_controller = None
     if config.desktop_control.enabled:

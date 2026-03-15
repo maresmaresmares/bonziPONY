@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class ScreenCapture:
-    """Captures screenshots of the primary monitor via mss + Pillow."""
+    """Captures screenshots of the pony's monitor via mss + Pillow."""
 
     def __init__(self, max_width: int = 1280) -> None:
         try:
@@ -21,7 +21,12 @@ class ScreenCapture:
 
         self._max_width = max_width
         self._available = True
+        self._get_pony_xy = None
         logger.info("ScreenCapture ready (max_width=%d).", max_width)
+
+    def set_pony_locator(self, fn) -> None:
+        """Set a callable that returns (x, y) of the pony's center."""
+        self._get_pony_xy = fn
 
     @property
     def available(self) -> bool:
@@ -36,7 +41,17 @@ class ScreenCapture:
             from PIL import Image
 
             with self._mss_mod.mss() as sct:
-                monitor = sct.monitors[1]
+                monitor = sct.monitors[1]  # default: primary
+                if self._get_pony_xy is not None:
+                    try:
+                        px, py = self._get_pony_xy()
+                        for m in sct.monitors[1:]:
+                            if (m["left"] <= px < m["left"] + m["width"]
+                                    and m["top"] <= py < m["top"] + m["height"]):
+                                monitor = m
+                                break
+                    except Exception:
+                        pass
                 raw = sct.grab(monitor)
 
             img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")

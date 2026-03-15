@@ -61,6 +61,16 @@ class DesktopController:
 
         logger.info("DesktopController ready (pet_hwnd=%d).", pet_hwnd)
 
+    def _get_monitor_rect(self, hwnd: int = 0):
+        """Get work-area MonitorRect for the given window (or pet window if 0)."""
+        try:
+            from core.monitor_utils import get_monitor_rect_for_hwnd
+            return get_monitor_rect_for_hwnd(hwnd or self._pet_hwnd)
+        except Exception:
+            w, h = self._pyautogui.size()
+            from core.monitor_utils import MonitorRect
+            return MonitorRect(0, 0, w, h, w, h)
+
     def _get_foreground_hwnd(self) -> int:
         """Return the HWND of the foreground window (Windows only)."""
         try:
@@ -138,16 +148,14 @@ class DesktopController:
                 win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
 
             elif action == RobotAction.SNAP_WINDOW_LEFT:
-                screen_w = self._pyautogui.size()[0]
-                screen_h = self._pyautogui.size()[1]
+                mon = self._get_monitor_rect(hwnd)
                 logger.info("Snapping window left HWND=%d", hwnd)
-                win32gui.MoveWindow(hwnd, 0, 0, screen_w // 2, screen_h, True)
+                win32gui.MoveWindow(hwnd, mon.left, mon.top, mon.width // 2, mon.height, True)
 
             elif action == RobotAction.SNAP_WINDOW_RIGHT:
-                screen_w = self._pyautogui.size()[0]
-                screen_h = self._pyautogui.size()[1]
+                mon = self._get_monitor_rect(hwnd)
                 logger.info("Snapping window right HWND=%d", hwnd)
-                win32gui.MoveWindow(hwnd, screen_w // 2, 0, screen_w // 2, screen_h, True)
+                win32gui.MoveWindow(hwnd, mon.left + mon.width // 2, mon.top, mon.width // 2, mon.height, True)
 
         except Exception as exc:
             logger.warning("Window action %s failed: %s", action, exc)
@@ -251,7 +259,7 @@ class DesktopController:
         return minimized
 
     def _is_prominent(self, hwnd: int) -> bool:
-        """Check if a window is maximized or covers a significant portion of the screen."""
+        """Check if a window is maximized or covers a significant portion of its monitor."""
         try:
             import win32gui
             if win32gui.IsZoomed(hwnd):
@@ -259,8 +267,8 @@ class DesktopController:
             rect = win32gui.GetWindowRect(hwnd)
             w = rect[2] - rect[0]
             h = rect[3] - rect[1]
-            screen_w, screen_h = self._pyautogui.size()
-            return w > 0 and h > 0 and (w * h) >= (screen_w * screen_h) * 0.4
+            mon = self._get_monitor_rect(hwnd)
+            return w > 0 and h > 0 and (w * h) >= (mon.width * mon.height) * 0.4
         except Exception:
             return False
 
@@ -310,6 +318,8 @@ class DesktopController:
                 self._cmd_browse(cmd.args)
             elif command == "SCROLL":
                 self._cmd_scroll(cmd.args)
+            elif command == "WRITE_NOTEPAD":
+                self._cmd_write_notepad(cmd.args)
             else:
                 logger.warning("Unknown desktop command: %s", command)
         except Exception as exc:
@@ -324,11 +334,12 @@ class DesktopController:
             return
 
         x, y = int(args[0]), int(args[1])
-        screen_w, screen_h = self._pyautogui.size()
+        from core.monitor_utils import get_virtual_desktop_rect
+        virt = get_virtual_desktop_rect()
 
-        # Bounds check
-        x = max(0, min(x, screen_w - 1))
-        y = max(0, min(y, screen_h - 1))
+        # Bounds check against entire virtual desktop (clicks can target any monitor)
+        x = max(virt.left, min(x, virt.right - 1))
+        y = max(virt.top, min(y, virt.bottom - 1))
 
         logger.info("Click at (%d, %d)", x, y)
         self._pyautogui.click(x, y)
@@ -418,6 +429,88 @@ class DesktopController:
         logger.info("Scroll: %d", amount)
         self._pyautogui.scroll(amount)
 
+    def _cmd_write_notepad(self, args: list[str]) -> None:
+        """Open a new Notepad window and paste text content into it."""
+        if not self._config.type_enabled:
+            logger.info("Type/write disabled by config.")
+            return
+        if not args:
+            logger.warning("WRITE_NOTEPAD requires content arg.")
+            return
+
+        text = ":".join(args)  # Rejoin in case content contained colons
+        # Interpret \n as real newlines
+        text = text.replace("\\n", "\n")
+        # Safety cap
+        if len(text) > 5000:
+            text = text[:5000]
+            logger.warning("WRITE_NOTEPAD text truncated to 5000 chars.")
+
+        logger.info("WRITE_NOTEPAD: %d chars", len(text))
+
+        # 1. Launch notepad
+        try:
+            proc = subprocess.Popen(["notepad.exe"])
+        except Exception as exc:
+            logger.warning("Failed to launch notepad: %s", exc)
+            return
+
+        # 2. Wait for the Notepad window to appear and get focus
+        try:
+            import win32gui
+            import win32con
+
+            notepad_hwnd = 0
+            for _ in range(60):  # up to ~3 seconds
+                time.sleep(0.05)
+                fg = win32gui.GetForegroundWindow()
+                try:
+                    cls = win32gui.GetClassName(fg)
+                except Exception:
+                    cls = ""
+                if cls == "Notepad" or "notepad" in cls.lower():
+                    notepad_hwnd = fg
+                    break
+
+            if notepad_hwnd == 0:
+                logger.warning("WRITE_NOTEPAD: Notepad window not found after launch.")
+                return
+
+            # Give it a moment to finish initializing
+            time.sleep(0.2)
+
+        except ImportError:
+            # No win32gui — just wait and hope
+            time.sleep(1.0)
+
+        # 3. Paste via clipboard (handles newlines, unicode, and is fast)
+        try:
+            import ctypes
+
+            CF_UNICODETEXT = 13
+            kernel32 = ctypes.windll.kernel32
+            user32 = ctypes.windll.user32
+
+            # Encode text as UTF-16LE for Windows clipboard
+            encoded = text.encode("utf-16-le") + b"\x00\x00"
+
+            user32.OpenClipboard(0)
+            user32.EmptyClipboard()
+
+            hmem = kernel32.GlobalAlloc(0x0042, len(encoded))  # GMEM_MOVEABLE | GMEM_ZEROINIT
+            ptr = kernel32.GlobalLock(hmem)
+            ctypes.memmove(ptr, encoded, len(encoded))
+            kernel32.GlobalUnlock(hmem)
+            user32.SetClipboardData(CF_UNICODETEXT, hmem)
+            user32.CloseClipboard()
+
+            # Ctrl+V to paste
+            self._pyautogui.hotkey("ctrl", "v")
+            logger.info("WRITE_NOTEPAD: pasted %d chars into Notepad", len(text))
+
+        except Exception as exc:
+            logger.warning("WRITE_NOTEPAD clipboard paste failed: %s", exc)
+
     # ── Advanced actions (called by agent loop) ──────────────────────────────
 
     def pause_media(self) -> None:
@@ -472,8 +565,6 @@ class DesktopController:
         except ImportError:
             return
 
-        screen_w, screen_h = self._pyautogui.size()
-        screen_area = screen_w * screen_h
         hwnds_and_rects = []
 
         def _callback(hwnd, _extra):
@@ -488,13 +579,14 @@ class DesktopController:
                 return True
             try:
                 rect = win32gui.GetWindowRect(hwnd)
-                # Only shake maximized or large windows (>40% of screen)
+                # Only shake maximized or large windows (>40% of their monitor)
                 if win32gui.IsZoomed(hwnd):
                     hwnds_and_rects.append((hwnd, rect))
                 else:
                     w = rect[2] - rect[0]
                     h = rect[3] - rect[1]
-                    if w > 0 and h > 0 and (w * h) >= screen_area * 0.4:
+                    mon = self._get_monitor_rect(hwnd)
+                    if w > 0 and h > 0 and (w * h) >= (mon.width * mon.height) * 0.4:
                         hwnds_and_rects.append((hwnd, rect))
             except Exception:
                 pass
@@ -540,15 +632,16 @@ class DesktopController:
         import random as _rand
         try:
             start_x, start_y = self._pyautogui.position()
-            screen_w, screen_h = self._pyautogui.size()
+            from core.monitor_utils import get_monitor_rect_for_point
+            mon = get_monitor_rect_for_point(start_x, start_y)
             end_time = time.monotonic() + duration
 
             logger.info("Messing with mouse for %.1fs", duration)
             while time.monotonic() < end_time:
                 dx = _rand.randint(-jitter, jitter)
                 dy = _rand.randint(-jitter, jitter)
-                new_x = max(5, min(screen_w - 5, start_x + dx))
-                new_y = max(5, min(screen_h - 5, start_y + dy))
+                new_x = max(mon.left + 5, min(mon.right - 5, start_x + dx))
+                new_y = max(mon.top + 5, min(mon.bottom - 5, start_y + dy))
                 self._pyautogui.moveTo(new_x, new_y, duration=0.05)
                 time.sleep(0.05)
 

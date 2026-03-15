@@ -107,6 +107,7 @@ Advanced desktop commands (use when asked to interact with the screen):
 - [DESKTOP:OPEN:app_name]    — open an app (notepad, calculator, etc.)
 - [DESKTOP:BROWSE:url]       — open a website (e.g. youtube.com, 4chan.org, reddit.com)
 - [DESKTOP:SCROLL:amount]    — scroll up (+) or down (-)
+- [DESKTOP:WRITE_NOTEPAD:content] — open Notepad and write content into it. Use \n for newlines. Great for lists, routines, plans, recipes, notes, etc.
 
 IMPORTANT for BROWSE: The user may say website names phonetically (e.g. "four chan" = 4chan.org, "read it" = reddit.com). Interpret what they mean and use the correct URL.
 

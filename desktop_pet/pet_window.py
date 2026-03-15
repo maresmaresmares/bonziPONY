@@ -95,8 +95,8 @@ class PetWindow(QWidget):
         screen = QApplication.primaryScreen()
         if screen:
             geom = screen.availableGeometry()
-            x = geom.width() // 2 - 100
-            y = geom.height() - 250
+            x = geom.x() + geom.width() // 2 - 100
+            y = geom.y() + geom.height() - 250
             self.move(x, y)
 
     def paintEvent(self, event) -> None:
@@ -274,8 +274,8 @@ class PetWindow(QWidget):
 
         screen = QApplication.primaryScreen()
         if screen:
-            geom = screen.availableGeometry()
-            # Bounce off edges
+            geom = screen.virtualGeometry()
+            # Bounce off edges of the entire virtual desktop (all monitors)
             if new_x < geom.left():
                 new_x = geom.left()
                 self._dx = abs(self._dx)
@@ -356,8 +356,9 @@ class PetWindow(QWidget):
         logger.info("Timed override: '%s' for %ds", anim_name, seconds)
 
     def move_to_region(self, region: str) -> None:
-        """Move the pony to a named screen region."""
-        screen = QApplication.primaryScreen()
+        """Move the pony to a named screen region on the pony's current monitor."""
+        center = self.geometry().center()
+        screen = QApplication.screenAt(center) or QApplication.primaryScreen()
         if not screen:
             return
         geom = screen.availableGeometry()

@@ -20,6 +20,7 @@ _KNOWN_BASE_URLS = {
     "lm_studio":  "http://localhost:1234/v1",
     "llamacpp":   "http://localhost:8080/v1",
     "llama_cpp":  "http://localhost:8080/v1",
+    "gemini":     "https://generativelanguage.googleapis.com/v1beta/openai",
     "koboldcpp":  "http://localhost:5001/v1",
     "textgen":    "http://localhost:5000/v1",
     "oobabooga":  "http://localhost:5000/v1",
