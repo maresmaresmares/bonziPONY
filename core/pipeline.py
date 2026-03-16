@@ -574,6 +574,19 @@ class Pipeline:
         "let me understand what's happening",
         "roleplay", "role-play", "stay in character",
         "the user is asking me to",
+        "i'm an assistant", "i am an assistant",
+        "how can i help you today",
+        "i'd be happy to help", "i'd be happy to assist",
+        "i can help you with", "let me help you with",
+        "text-to-speech engine",  # quoting our own system prompt
+        "anti-slop rules",        # quoting our own system prompt
+        "voice rules",            # quoting our own system prompt
+    )
+    # Strong signals — a single hit is enough
+    _CHARACTER_BREAK_STRONG = (
+        "system prompt", "character card", "character configuration",
+        "i'm claude", "i am claude", "i'm chatgpt", "i am chatgpt",
+        "as an ai assistant",
     )
 
     @staticmethod
@@ -582,8 +595,12 @@ class Pipeline:
         if not response or len(response) < 30:
             return False
         lower = response.lower()
+        # Single strong signal is enough
+        if any(phrase in lower for phrase in Pipeline._CHARACTER_BREAK_STRONG):
+            return True
+        # Two weak signals
         hits = sum(1 for phrase in Pipeline._CHARACTER_BREAK_PHRASES if phrase in lower)
-        return hits >= 2  # Need at least 2 indicators to avoid false positives
+        return hits >= 2
 
     # Phrases that signal the user is leaving or ending the conversation
     _USER_END_PHRASES = (

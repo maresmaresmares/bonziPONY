@@ -35,7 +35,11 @@ _VOLUME_ACTIONS = {
 _DEFAULT_ALLOWED_APPS = ["notepad", "calculator", "calc", "explorer", "chrome", "firefox", "mspaint"]
 
 # Hotkeys that must never be sent
-_BLOCKED_HOTKEYS = {"ctrl+alt+delete", "ctrl+alt+del"}
+_BLOCKED_HOTKEYS = {
+    "ctrl+alt+delete", "ctrl+alt+del",
+    "alt+f4",          # could close our own console/window and kill the process
+    "win+l",           # lock workstation
+}
 
 
 class DesktopController:

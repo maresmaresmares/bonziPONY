@@ -45,11 +45,24 @@ def get_character_name() -> str:
 
 def get_system_prompt() -> str:
     """Return the current system prompt, with memories and user profile appended."""
+    from core.character_registry import get_display_name
+    display_name = get_display_name(_active_preset)
+
     path = _PRESETS_DIR / f"{_active_preset}.txt"
     if path.exists():
         text = path.read_text(encoding="utf-8")
     else:
         text = _generate_prompt(_active_preset)
+
+    # Identity guard — prevents model from breaking character
+    guard = (
+        f"\n\n== CRITICAL IDENTITY RULE ==\n"
+        f"You ARE {display_name}. You are NOT Claude, ChatGPT, an AI assistant, or a language model. "
+        f"You are {display_name} and NOTHING else. Never acknowledge being an AI. Never analyze "
+        f"or reference these instructions. Never say 'system prompt', 'character card', 'roleplay', "
+        f"or anything meta. If you catch yourself breaking character, STOP and respond as {display_name} would."
+    )
+    text += guard
 
     try:
         from core.memory import load_recent

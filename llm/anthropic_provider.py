@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
 from typing import List, Optional
 
@@ -12,6 +13,7 @@ from llm.prompt import get_system_prompt
 
 _MAX_RETRIES = 3
 _RETRY_BACKOFF = (1.0, 3.0, 5.0)
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,7 @@ class AnthropicProvider(LLMProvider):
         )
 
         assistant_text = response.content[0].text if response.content else ""
+        assistant_text = self._strip_think(assistant_text)
         self._history.append({"role": "assistant", "content": assistant_text})
         return assistant_text
 
@@ -83,6 +86,16 @@ class AnthropicProvider(LLMProvider):
     def reset_history(self) -> None:
         self._history.clear()
         logger.debug("Anthropic history cleared.")
+
+    @staticmethod
+    def _strip_think(text: str) -> str:
+        """Remove <think>...</think> blocks from reasoning models."""
+        text = _THINK_RE.sub("", text)
+        lower = text.lower()
+        if "<think>" in lower and "</think>" not in lower:
+            idx = lower.rfind("<think>")
+            text = text[:idx]
+        return text.strip()
 
     def generate_once(self, prompt: str, max_tokens: int | None = None) -> str:
         """One-shot call — does not touch self._history."""
@@ -94,7 +107,7 @@ class AnthropicProvider(LLMProvider):
             temperature=self.temperature,
             max_tokens=max_tokens or self.max_tokens,
         )
-        return response.content[0].text if response.content else ""
+        return self._strip_think(response.content[0].text if response.content else "")
 
     def describe_image(self, jpeg_bytes: bytes) -> Optional[str]:
         """One-shot vision call — returns a plain description of the image."""
