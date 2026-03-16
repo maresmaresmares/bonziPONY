@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import time
 import webbrowser
@@ -88,16 +89,89 @@ class DesktopController:
         """Check if the given HWND is the pet window itself."""
         return self._pet_hwnd != 0 and hwnd == self._pet_hwnd
 
+    # Cache of ancestor PIDs — computed once, never changes
+    _ancestor_pids: set | None = None
+
     @staticmethod
-    def _is_own_console(hwnd: int) -> bool:
-        """Check if the window is the console hosting our process."""
+    def _get_ancestor_pids() -> set:
+        """Get PIDs of all ancestor processes (parent, grandparent, etc.)."""
+        if DesktopController._ancestor_pids is not None:
+            return DesktopController._ancestor_pids
+        pids = {os.getpid()}
         try:
             import ctypes
-            # GetConsoleWindow returns the HWND of the console attached to
-            # this process — works even though conhost.exe owns the window
-            # (the old PID check failed because conhost has a different PID).
+            import ctypes.wintypes
+
+            # Snapshot all processes to build parent chain
+            TH32CS_SNAPPROCESS = 0x00000002
+
+            class PROCESSENTRY32(ctypes.Structure):
+                _fields_ = [
+                    ("dwSize", ctypes.wintypes.DWORD),
+                    ("cntUsage", ctypes.wintypes.DWORD),
+                    ("th32ProcessID", ctypes.wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+                    ("th32ModuleID", ctypes.wintypes.DWORD),
+                    ("cntThreads", ctypes.wintypes.DWORD),
+                    ("th32ParentProcessID", ctypes.wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long),
+                    ("dwFlags", ctypes.wintypes.DWORD),
+                    ("szExeFile", ctypes.c_char * 260),
+                ]
+
+            kernel32 = ctypes.windll.kernel32
+            snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+            if snap == -1:
+                DesktopController._ancestor_pids = pids
+                return pids
+
+            # Build PID → parent PID map
+            pid_parent = {}
+            pe = PROCESSENTRY32()
+            pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
+            if kernel32.Process32First(snap, ctypes.byref(pe)):
+                while True:
+                    pid_parent[pe.th32ProcessID] = pe.th32ParentProcessID
+                    if not kernel32.Process32Next(snap, ctypes.byref(pe)):
+                        break
+            kernel32.CloseHandle(snap)
+
+            # Walk up the parent chain
+            current = os.getpid()
+            for _ in range(20):  # safety limit
+                parent = pid_parent.get(current)
+                if parent is None or parent == 0 or parent == current:
+                    break
+                pids.add(parent)
+                current = parent
+
+        except Exception as exc:
+            logger.debug("Failed to get ancestor PIDs: %s", exc)
+
+        DesktopController._ancestor_pids = pids
+        return pids
+
+    @staticmethod
+    def _is_own_console(hwnd: int) -> bool:
+        """Check if the window is the console or terminal hosting our process.
+
+        Checks:
+        1. GetConsoleWindow() — handles legacy conhost.exe
+        2. Window's owning process is in our ancestor PID chain — handles
+           Windows Terminal, cmd.exe, powershell.exe, VS Code terminal, etc.
+        """
+        try:
+            import ctypes
+            # Check 1: GetConsoleWindow (catches conhost.exe pseudo-console)
             console_hwnd = ctypes.windll.kernel32.GetConsoleWindow()
             if console_hwnd and hwnd == console_hwnd:
+                return True
+
+            # Check 2: window's process is one of our ancestors
+            import ctypes.wintypes
+            pid = ctypes.wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value in DesktopController._get_ancestor_pids():
                 return True
         except Exception:
             pass
