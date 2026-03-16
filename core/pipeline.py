@@ -384,6 +384,24 @@ class Pipeline:
             raw_response = self.llm.chat(user_text)
             logger.info("LLM response: %r", raw_response)
 
+            # Detect character break — model meta-analyzing the prompt instead of role-playing
+            if self._is_character_break(raw_response):
+                logger.warning("Character break detected — retrying once.")
+                # Remove the broken exchange from history and retry
+                hist = getattr(self.llm, "_history", None)
+                if hist is not None and len(hist) >= 2:
+                    hist.pop()  # broken assistant response
+                    hist.pop()  # our user message (chat() will re-add it)
+                raw_response = self.llm.chat(user_text)
+                logger.info("LLM retry response: %r", raw_response)
+                if self._is_character_break(raw_response):
+                    logger.warning("Character break on retry — using fallback.")
+                    # Remove the second broken exchange too
+                    if hist is not None and len(hist) >= 2:
+                        hist.pop()
+                        hist.pop()
+                    raw_response = "hmm, uh, sorry I kinda spaced out for a second there. what were you saying? [CONVO:CONTINUE]"
+
             from llm.response_parser import parse_response
             parsed: ParsedResponse = parse_response(raw_response)
 
@@ -542,6 +560,29 @@ class Pipeline:
             self._transition(PipelineState.ERROR)
             logger.exception("Pipeline turn error: %s", exc)
             return False
+
+    # Phrases that indicate the model broke character and is meta-analyzing
+    _CHARACTER_BREAK_PHRASES = (
+        "system prompt", "character configuration", "character card",
+        "claude on claude", "i'm claude", "i am claude", "as claude",
+        "i'm an ai", "i am an ai", "as an ai", "language model",
+        "i'm chatgpt", "i am chatgpt", "as chatgpt",
+        "desktop companion prompt", "bonzipony conversation",
+        "sharing this with me", "sharing your prompt",
+        "looking at this document", "analyze this prompt",
+        "let me understand what's happening",
+        "roleplay", "role-play", "stay in character",
+        "the user is asking me to",
+    )
+
+    @staticmethod
+    def _is_character_break(response: str) -> bool:
+        """Detect when the model broke character and is meta-analyzing the prompt."""
+        if not response or len(response) < 30:
+            return False
+        lower = response.lower()
+        hits = sum(1 for phrase in Pipeline._CHARACTER_BREAK_PHRASES if phrase in lower)
+        return hits >= 2  # Need at least 2 indicators to avoid false positives
 
     # Phrases that signal the user is leaving or ending the conversation
     _USER_END_PHRASES = (

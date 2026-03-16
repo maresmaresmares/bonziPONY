@@ -47,6 +47,9 @@ _MOVETO_PATTERN = re.compile(r"\[MOVETO:\s*([^\]]+?)\s*\]", re.IGNORECASE)
 # Catch-all: strip any remaining [TAG:...] bracket expressions the LLM may produce
 _LEFTOVER_TAG_PATTERN = re.compile(r"\[(?:MOVETO|PERSIST|ANIM|ACTION|CONVO|DESKTOP|DIRECTIVE|TIMER|ROUTINE|ENFORCE|DONE|DELAY)\s*:[^\]]*\]", re.IGNORECASE)
 
+# Strip <think>...</think> blocks from reasoning models (DeepSeek, QwQ, etc.)
+_THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
 
 @dataclass
 class DesktopCommand:
@@ -94,6 +97,13 @@ class ParsedResponse:
 
 def parse_response(raw: str) -> ParsedResponse:
     """Strip all tags from raw LLM text and extract structured data."""
+    # Strip <think>...</think> blocks from reasoning models
+    raw = _THINK_BLOCK_PATTERN.sub("", raw).strip()
+    # Also strip unclosed <think> blocks (model hit token limit mid-thought)
+    if "<think>" in raw.lower() and "</think>" not in raw.lower():
+        idx = raw.lower().rfind("<think>")
+        raw = raw[:idx].strip()
+
     actions: List[RobotAction] = []
     desktop_commands: List[DesktopCommand] = []
     directive: Optional[DirectiveTag] = None
