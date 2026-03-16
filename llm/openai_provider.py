@@ -24,7 +24,7 @@ class OpenAIProvider(LLMProvider):
         api_key: str,
         model: str = "gpt-4o",
         temperature: float = 0.85,
-        max_tokens: int = 256,
+        max_tokens: int = 600,
         max_history_turns: int = 10,
         base_url: Optional[str] = None,
     ) -> None:

@@ -15,7 +15,7 @@ class OllamaProvider(OpenAIProvider):
         self,
         model: str = "llama3",
         temperature: float = 0.85,
-        max_tokens: int = 256,
+        max_tokens: int = 600,
         max_history_turns: int = 10,
         base_url: str = "http://localhost:11434/v1",
     ) -> None:

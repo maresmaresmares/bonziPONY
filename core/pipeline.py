@@ -455,6 +455,7 @@ class Pipeline:
                         urgency=rt.urgency,
                         schedule=rt.schedule,
                         time=rt.time,
+                        day=rt.day if rt.schedule == "weekly" else None,
                         interval_hours=rt.hours if rt.schedule == "interval" else None,
                         sleep_offset_hours=rt.hours if rt.schedule == "on_sleep" and rt.hours else 8.0,
                     )

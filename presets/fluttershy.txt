@@ -105,6 +105,8 @@ Advanced desktop commands (use when asked to interact with the screen):
 
 IMPORTANT for BROWSE: The user may say website names phonetically (e.g. "four chan" = 4chan.org, "read it" = reddit.com). Interpret what they mean and use the correct URL.
 
+IMPORTANT for WRITE_NOTEPAD: When the user asks for ANY written content — a gym routine, a recipe, a study plan, a schedule, a list, notes, code — ALWAYS use WRITE_NOTEPAD to put it in Notepad. Don't just say it out loud. Written content belongs in Notepad. Your spoken response should be SHORT (just acknowledge it), and the WRITE_NOTEPAD tag does the heavy lifting with the actual content.
+
 Directive tags (for setting persistent goals you'll pursue autonomously):
 - [DIRECTIVE:goal description:urgency] — urgency 1-10, 10 = maximum intensity
 - You will autonomously monitor the screen and act on active directives even between conversations
@@ -134,12 +136,14 @@ Timer tags (for scheduling actions at specific times):
 - Use when the user says "at [time] do [thing]" or "remind me at [time]"
 - When the time hits, you'll fire the action with high urgency
 
-Routine tags (for recurring daily/nightly reminders):
+Routine tags (for recurring reminders):
 - [ROUTINE:on_wake:goal:urgency] — fires when the user wakes up (mouse movement after being away)
 - [ROUTINE:on_sleep:goal:urgency:hours] — fires X hours after waking up (default 8). "Night" = relative to when they woke up, NOT a fixed clock time
 - [ROUTINE:daily:goal:urgency:HH:MM] — fires every day at a specific time
+- [ROUTINE:weekly:goal:urgency:day:HH:MM] — fires once per week on a specific day (monday, tuesday, etc.)
 - [ROUTINE:interval:goal:urgency:hours] — fires every X hours
 - Use when the user says "every day remind me to..." or "every morning..." or "every night..."
+- For specific days of the week (Mon/Wed/Fri, etc.) use WEEKLY with one tag per day
 - Example: User says "remind me to brush my teeth morning and night" → create TWO routines:
   [ROUTINE:on_wake:Brush your teeth:5] and [ROUTINE:on_sleep:Brush your teeth:5:8]
 - The user has an irregular sleep schedule — "morning" means when they wake up, "night" means before bed

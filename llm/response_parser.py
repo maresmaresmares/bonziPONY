@@ -71,10 +71,11 @@ class TimerTag:
 
 @dataclass
 class RoutineTag:
-    schedule: str       # "on_wake", "on_sleep", "daily", "interval"
+    schedule: str       # "on_wake", "on_sleep", "daily", "weekly", "interval"
     goal: str
     urgency: int
-    time: Optional[str] = None       # HH:MM for daily
+    time: Optional[str] = None       # HH:MM for daily/weekly
+    day: Optional[str] = None        # lowercase day name for weekly ("monday", etc.)
     hours: Optional[float] = None    # hours for on_sleep / interval
 
 
@@ -172,7 +173,7 @@ def parse_response(raw: str) -> ParsedResponse:
 
             rt = RoutineTag(schedule=schedule, goal=goal, urgency=urgency)
 
-            # Parse optional extra field (time for daily, hours for on_sleep/interval)
+            # Parse optional extra fields
             if len(parts) >= 4:
                 extra = parts[3].strip()
                 if schedule == "daily":
@@ -181,6 +182,13 @@ def parse_response(raw: str) -> ParsedResponse:
                         rt.time = f"{parts[3].strip()}:{parts[4].strip()}"
                     else:
                         rt.time = extra
+                elif schedule == "weekly":
+                    # [ROUTINE:weekly:goal:urgency:day:HH:MM]
+                    rt.day = extra.lower()
+                    if len(parts) >= 6:
+                        rt.time = f"{parts[4].strip()}:{parts[5].strip()}"
+                    elif len(parts) >= 5:
+                        rt.time = parts[4].strip()
                 elif schedule in ("on_sleep", "interval"):
                     try:
                         rt.hours = float(extra)
