@@ -613,44 +613,31 @@ class ContextMenuBuilder:
             and not cfg.vision.screen_capture
             and not cfg.vision.enabled
         )
-        menu.addAction(self._toggle(
-            "Conversation Only", is_convo_only,
-            lambda c: self._set_conversation_only(c)))
+        self._add_toggle(menu, "Conversation Only", is_convo_only,
+                         lambda c: self._set_conversation_only(c))
 
         menu.addSeparator()
 
         # ── Features toggles submenu ──────────────────────────────────
         feat_menu = menu.addMenu("Features")
 
-        feat_menu.addAction(self._toggle(
-            "Autonomous Mode", cfg.agent.enabled,
-            lambda c: self._set("agent", "enabled", c)))
-
-        feat_menu.addAction(self._toggle(
-            "Self-Initiate", cfg.agent.self_initiate,
-            lambda c: self._set("agent", "self_initiate", c)))
-
-        feat_menu.addAction(self._toggle(
-            "Desktop Control", cfg.desktop_control.enabled,
-            lambda c: self._set("desktop_control", "enabled", c)))
-
-        feat_menu.addAction(self._toggle(
-            "TTS (Voice)", cfg.tts.enabled,
-            lambda c: self._set("tts", "enabled", c)))
-
-        feat_menu.addAction(self._toggle(
-            "Speech Bubbles", cfg.desktop_pet.speech_bubble,
-            lambda c: self._set("desktop_pet", "speech_bubble", c)))
+        self._add_toggle(feat_menu, "Autonomous Mode", cfg.agent.enabled,
+                         lambda c: self._set("agent", "enabled", c))
+        self._add_toggle(feat_menu, "Self-Initiate", cfg.agent.self_initiate,
+                         lambda c: self._set("agent", "self_initiate", c))
+        self._add_toggle(feat_menu, "Desktop Control", cfg.desktop_control.enabled,
+                         lambda c: self._set("desktop_control", "enabled", c))
+        self._add_toggle(feat_menu, "TTS (Voice)", cfg.tts.enabled,
+                         lambda c: self._set("tts", "enabled", c))
+        self._add_toggle(feat_menu, "Speech Bubbles", cfg.desktop_pet.speech_bubble,
+                         lambda c: self._set("desktop_pet", "speech_bubble", c))
 
         feat_menu.addSeparator()
 
-        feat_menu.addAction(self._toggle(
-            "Screenshots", cfg.vision.screen_capture,
-            lambda c: self._set("vision", "screen_capture", c)))
-
-        feat_menu.addAction(self._toggle(
-            "Webcam", cfg.vision.enabled,
-            lambda c: self._set("vision", "enabled", c)))
+        self._add_toggle(feat_menu, "Screenshots", cfg.vision.screen_capture,
+                         lambda c: self._set("vision", "screen_capture", c))
+        self._add_toggle(feat_menu, "Webcam", cfg.vision.enabled,
+                         lambda c: self._set("vision", "enabled", c))
 
         menu.addSeparator()
 
@@ -753,6 +740,15 @@ class ContextMenuBuilder:
 
     def _toggle(self, text: str, checked: bool, callback) -> QAction:
         act = QAction(text)
+        act.setCheckable(True)
+        act.setChecked(checked)
+        act.triggered.connect(callback)
+        return act
+
+    @staticmethod
+    def _add_toggle(menu: QMenu, text: str, checked: bool, callback) -> QAction:
+        """Create a checkable action parented to the menu so it won't be GC'd."""
+        act = menu.addAction(text)
         act.setCheckable(True)
         act.setChecked(checked)
         act.triggered.connect(callback)
