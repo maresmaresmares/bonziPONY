@@ -65,6 +65,9 @@ class PetWindow(QWidget):
         # Context menu builder (set by main.py)
         self._menu_builder = None
 
+        # Cursor tracking (pony faces the mouse when idle)
+        self._cursor_check_counter = 0
+
         # Drag state
         self._dragging = False
         self._drag_offset = QPoint()
@@ -152,6 +155,18 @@ class PetWindow(QWidget):
                 pixmap = self._current_anim.frames[self._frame_index]
                 if pixmap.width() > 0 and pixmap.height() > 0:
                     self.setFixedSize(pixmap.width(), pixmap.height())
+
+        # Cursor tracking — pony faces the mouse when standing idle
+        self._cursor_check_counter += 1
+        if self._cursor_check_counter >= 30:  # ~every 500ms at 60fps
+            self._cursor_check_counter = 0
+            if not self._dragging and self._dx == 0 and self._dy == 0:
+                cursor = QCursor.pos()
+                center_x = self.x() + self.width() // 2
+                should_right = cursor.x() > center_x
+                if should_right != self._facing_right:
+                    self._facing_right = should_right
+                    self._update_facing()
 
         # Move sprite if roaming and not dragging
         if self._roaming and not self._dragging and self._override_anim_name is None:

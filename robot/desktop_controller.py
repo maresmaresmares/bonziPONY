@@ -86,15 +86,18 @@ class DesktopController:
 
     @staticmethod
     def _is_own_console(hwnd: int) -> bool:
-        """Check if the window belongs to our own process (the CMD/console running main.py)."""
+        """Check if the window is the console hosting our process."""
         try:
-            import os
             import ctypes
-            pid = ctypes.c_ulong()
-            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            return pid.value == os.getpid()
+            # GetConsoleWindow returns the HWND of the console attached to
+            # this process — works even though conhost.exe owns the window
+            # (the old PID check failed because conhost has a different PID).
+            console_hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if console_hwnd and hwnd == console_hwnd:
+                return True
         except Exception:
-            return False
+            pass
+        return False
 
     def _enforce_cooldown(self) -> None:
         """Wait if we're within cooldown period of last command."""
@@ -522,6 +525,47 @@ class DesktopController:
         except Exception as exc:
             logger.warning("pause_media failed: %s", exc)
 
+    @staticmethod
+    def _is_fullscreen_window(hwnd: int) -> bool:
+        """Check if a window is fullscreen on its monitor."""
+        try:
+            import win32gui
+            from core.monitor_utils import get_monitor_screen_rect_for_hwnd
+            rect = win32gui.GetWindowRect(hwnd)
+            mon = get_monitor_screen_rect_for_hwnd(hwnd)
+            return (rect[0] <= mon.left and rect[1] <= mon.top
+                    and rect[2] >= mon.right and rect[3] >= mon.bottom)
+        except Exception:
+            return False
+
+    def alt_tab(self) -> None:
+        """Simulate Alt+Tab to yank the user out of fullscreen apps/games."""
+        self._enforce_cooldown()
+        try:
+            import ctypes
+            VK_MENU = 0x12  # Alt
+            VK_TAB = 0x09
+            KEYEVENTF_KEYUP = 0x0002
+            user32 = ctypes.windll.user32
+            user32.keybd_event(VK_MENU, 0, 0, 0)
+            user32.keybd_event(VK_TAB, 0, 0, 0)
+            user32.keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, 0)
+            user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+            logger.info("Alt+Tab sent")
+        except Exception as exc:
+            logger.warning("alt_tab failed: %s", exc)
+
+    def system_beep(self, frequency: int = 1000, duration_ms: int = 500) -> None:
+        """Play an annoying system beep."""
+        try:
+            import winsound
+            frequency = max(37, min(frequency, 32767))
+            duration_ms = max(50, min(duration_ms, 3000))
+            logger.info("System beep: %dHz for %dms", frequency, duration_ms)
+            winsound.Beep(frequency, duration_ms)
+        except Exception as exc:
+            logger.warning("system_beep failed: %s", exc)
+
     def shake_window(self, hwnd: int = 0, duration: float = 5.0, intensity: int = 15) -> None:
         """Rapidly vibrate a window to get the user's attention — like an alarm clock."""
         try:
@@ -532,6 +576,9 @@ class DesktopController:
         if hwnd == 0:
             hwnd = self._get_foreground_hwnd()
         if hwnd == 0 or self._is_pet_window(hwnd) or self._is_own_console(hwnd):
+            return
+        if self._is_fullscreen_window(hwnd):
+            logger.info("Skipping shake — window HWND=%d is fullscreen.", hwnd)
             return
         if not self._is_prominent(hwnd):
             logger.info("Skipping shake — window HWND=%d is not maximized/prominent.", hwnd)
@@ -578,6 +625,8 @@ class DesktopController:
             if not title or not title.strip():
                 return True
             try:
+                if self._is_fullscreen_window(hwnd):
+                    return True  # skip fullscreen windows
                 rect = win32gui.GetWindowRect(hwnd)
                 # Only shake maximized or large windows (>40% of their monitor)
                 if win32gui.IsZoomed(hwnd):

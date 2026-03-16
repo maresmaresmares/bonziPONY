@@ -914,6 +914,7 @@ class AgentLoop:
             '  - {"command":"MESS_MOUSE","args":[]} — jitter the mouse chaotically (high urgency only)',
             '  - {"command":"PAUSE_MEDIA","args":[]} — press play/pause key (use for YouTube, Spotify, media apps instead of minimizing)',
             '  - {"command":"GOOGLE_IMAGES","args":["search term"]} — open Google Images for the thing they should be doing (e.g. "gym motivation", "healthy food", "sleeping peacefully")',
+            '  - {"command":"ALT_TAB","args":[]} — simulate Alt+Tab to yank user out of fullscreen apps/games',
             '  - {"command":"OPEN","args":["app_name"]}',
             '  - {"command":"BROWSE","args":["url"]}',
             '  - {"command":"WRITE_NOTEPAD","args":["content with \\n for newlines"]} — open Notepad and write content (lists, routines, plans, notes)',
@@ -928,11 +929,12 @@ class AgentLoop:
             "- Escalation is GRADUATED. Follow this chaos roll system:",
             f"  CHAOS ROLL this tick: {random.randint(1, 100)}",
             "  Urgency 1-3: speak and nag only.",
-            "  Urgency 4-5: nag harder. If chaos roll > 60, SHAKE a distracting window.",
-            "  Urgency 6: GOOGLE_IMAGES the directive goal (e.g. 'gym', 'food', 'sleep') — show them what they SHOULD be doing. Also SHAKE a distracting window.",
-            "  Urgency 7: GOOGLE_IMAGES again + SHAKE windows + PAUSE_MEDIA for media. If chaos roll > 40, MESS_MOUSE.",
-            "  Urgency 8: SHAKE_ALL + MESS_MOUSE. If chaos roll > 30, start closing/minimizing windows.",
-            "  Urgency 9-10: FULL NUCLEAR. SHAKE_ALL, MESS_MOUSE, close everything. Go wild.",
+            "  Urgency 4-5: nag harder. If chaos roll > 60, SHAKE a window (skip if fullscreen).",
+            "  Urgency 6: GOOGLE_IMAGES the directive goal. SHAKE or ALT_TAB if fullscreen.",
+            "  Urgency 7: GOOGLE_IMAGES + ALT_TAB + PAUSE_MEDIA. If chaos roll > 40, MESS_MOUSE.",
+            "  Urgency 8: ALT_TAB + MESS_MOUSE. If chaos roll > 30, close/minimize windows.",
+            "  Urgency 9-10: FULL NUCLEAR. ALT_TAB, MESS_MOUSE, close everything. Go wild.",
+            "- IMPORTANT: SHAKE does NOT work on fullscreen apps/games. Use ALT_TAB instead.",
             "- The chaos roll adds unpredictability — sometimes you're chill, sometimes you snap early. Embrace it.",
             "- Be creative and in-character. You're a prankster with a mission.",
             "- CRITICAL: When speaking, talk DIRECTLY TO the user in second person. NEVER say 'remind the user' or 'get user to' — you ARE talking to them. Say 'go do it' not 'remind user to do it'.",
@@ -1080,6 +1082,9 @@ class AgentLoop:
                     elif command == "PAUSE_MEDIA":
                         self._desktop.pause_media()
                         self._log_action("Paused media playback")
+                    elif command == "ALT_TAB":
+                        self._desktop.alt_tab()
+                        self._log_action("Alt+Tab (yank out of fullscreen)")
                     elif command == "GOOGLE_IMAGES":
                         if args:
                             import urllib.parse
@@ -1416,8 +1421,14 @@ class AgentLoop:
                 except Exception:
                     pass
 
+    _TAG_STRIP_RE = re.compile(r"\[[A-Z_]+(?::[^\]]*)?]")
+
     def _speak(self, text: str) -> None:
         """Speak text via TTS with detector pause/resume and GUI callbacks."""
+        # Strip any bracket tags the LLM leaked (e.g. [CONVO:CONTINUE])
+        text = self._TAG_STRIP_RE.sub("", text).strip()
+        if not text:
+            return
         try:
             if self._detector:
                 self._detector.pause()

@@ -619,32 +619,36 @@ class ContextMenuBuilder:
 
         menu.addSeparator()
 
-        # ── Quick toggles ────────────────────────────────────────────
-        menu.addAction(self._toggle(
+        # ── Features toggles submenu ──────────────────────────────────
+        feat_menu = menu.addMenu("Features")
+
+        feat_menu.addAction(self._toggle(
             "Autonomous Mode", cfg.agent.enabled,
             lambda c: self._set("agent", "enabled", c)))
 
-        menu.addAction(self._toggle(
+        feat_menu.addAction(self._toggle(
             "Self-Initiate", cfg.agent.self_initiate,
             lambda c: self._set("agent", "self_initiate", c)))
 
-        menu.addAction(self._toggle(
+        feat_menu.addAction(self._toggle(
             "Desktop Control", cfg.desktop_control.enabled,
             lambda c: self._set("desktop_control", "enabled", c)))
 
-        menu.addAction(self._toggle(
+        feat_menu.addAction(self._toggle(
             "TTS (Voice)", cfg.tts.enabled,
             lambda c: self._set("tts", "enabled", c)))
 
-        menu.addAction(self._toggle(
+        feat_menu.addAction(self._toggle(
             "Speech Bubbles", cfg.desktop_pet.speech_bubble,
             lambda c: self._set("desktop_pet", "speech_bubble", c)))
 
-        menu.addAction(self._toggle(
+        feat_menu.addSeparator()
+
+        feat_menu.addAction(self._toggle(
             "Screenshots", cfg.vision.screen_capture,
             lambda c: self._set("vision", "screen_capture", c)))
 
-        menu.addAction(self._toggle(
+        feat_menu.addAction(self._toggle(
             "Webcam", cfg.vision.enabled,
             lambda c: self._set("vision", "enabled", c)))
 

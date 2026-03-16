@@ -283,10 +283,13 @@ class WakeWordDetector:
                         # Matched — break inner loop to re-check pause flag
                         break
 
-            except OSError as exc:
+            except (OSError, AttributeError) as exc:
+                # AttributeError: speech_recognition's Microphone.__exit__
+                # calls self.stream.close() even when the stream was never
+                # opened (e.g. wrong device index, mic busy/missing).
                 if not self._stop.is_set():
                     logger.warning("Microphone error in wake detector: %s", exc)
-                    time.sleep(1.0)
+                    time.sleep(2.0)
             except Exception as exc:
                 if not self._stop.is_set():
                     logger.error("Wake detector error: %s", exc)
