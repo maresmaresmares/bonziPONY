@@ -26,6 +26,7 @@ class PetWindow(QWidget):
     conversation_requested = pyqtSignal()
     text_message = pyqtSignal(str)  # Emitted when user types a message via double-click
     idle_chatter = pyqtSignal()  # Emitted randomly to trigger a quip bubble
+    listen_interrupted = pyqtSignal()  # Emitted when user clicks during LISTEN to stop early
 
     def __init__(
         self,
@@ -370,6 +371,44 @@ class PetWindow(QWidget):
         self.set_override_animation(anim_name)
         logger.info("Timed override: '%s' for %ds", anim_name, seconds)
 
+    # Generic/boring behavior names to exclude from trick pool
+    _BORING_NAMES = {
+        "stand", "walk", "walk_wings", "trot", "fly", "hover", "sleep",
+        "drag", "theme", "conga", "conga start", "ride", "ride-start",
+    }
+
+    def do_trick(self) -> None:
+        """Pick a cool/interesting behavior from the current character and play it."""
+        all_behaviors = list(self.behavior_manager.behaviors.values())
+
+        # Filter to "interesting" behaviors: has effects, rare, or unique name
+        tricks = []
+        for b in all_behaviors:
+            name_lower = b.name.lower()
+            # Skip boring generic behaviors
+            if name_lower in self._BORING_NAMES:
+                continue
+            # Skip chain-only behaviors that start with "theme" or "conga"
+            if any(name_lower.startswith(prefix) for prefix in ("theme", "conga", "banner")):
+                continue
+            # Skip drag behavior
+            if b.movement == MovementType.DRAGGED:
+                continue
+            # Keep it if it has effects, or isn't a generic movement behavior
+            if b.effects or b.speed == 0 or name_lower not in self._BORING_NAMES:
+                tricks.append(b)
+
+        if not tricks:
+            # Fallback: just pick any non-walk behavior
+            tricks = [b for b in all_behaviors if b.name.lower() != "stand"]
+
+        if not tricks:
+            return
+
+        trick = random.choice(tricks)
+        logger.info("Doing trick: '%s'", trick.name)
+        self._start_behavior(trick)
+
     def move_to_region(self, region: str) -> None:
         """Move the pony to a named screen region on the pony's current monitor."""
         center = self.geometry().center()
@@ -468,6 +507,10 @@ class PetWindow(QWidget):
     # ── Mouse interaction ───────────────────────────────────────────────────
 
     def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self._show_mic:
+            # Clicking while listening → stop recording, process what we have
+            self.listen_interrupted.emit()
+            return
         if event.button() == Qt.LeftButton:
             self._dragging = True
             self._drag_offset = event.globalPos() - self.pos()

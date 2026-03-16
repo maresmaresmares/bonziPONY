@@ -84,6 +84,18 @@ class OpenAIProvider(LLMProvider):
             max_tokens=self.max_tokens,
         )
 
+        # If the response was truncated (hit token limit), retry with a much
+        # higher limit so long-form content (WRITE_NOTEPAD etc.) isn't cut off.
+        finish = getattr(response.choices[0], "finish_reason", None) if response.choices else None
+        if finish == "length":
+            logger.info("Response truncated at %d tokens — retrying with extended limit.", self.max_tokens)
+            response = self._call_with_retry(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=max(self.max_tokens * 4, 4096),
+            )
+
         assistant_text = response.choices[0].message.content or ""
         assistant_text = self._strip_think(assistant_text)
         self._history.append({"role": "assistant", "content": assistant_text})

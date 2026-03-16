@@ -20,6 +20,7 @@ Flow:
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Optional
 
 import numpy as np
@@ -28,6 +29,34 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
+
+
+class _ListenInterrupted(Exception):
+    """Raised by the stream wrapper when listening is interrupted by user click."""
+    def __init__(self, frames: list[bytes]) -> None:
+        self.frames = frames
+
+
+class _InterruptableStream:
+    """Wraps a PyAudio stream so we can interrupt recording via a threading.Event."""
+
+    def __init__(self, stream, stop_event: threading.Event) -> None:
+        self._stream = stream
+        self._stop_event = stop_event
+        self._frames: list[bytes] = []
+
+    def read(self, size, **kwargs):
+        if self._stop_event.is_set():
+            raise _ListenInterrupted(list(self._frames))
+        data = self._stream.read(size, **kwargs)
+        self._frames.append(data)
+        return data
+
+    def close(self):
+        return self._stream.close()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
 
 
 class Transcriber:
@@ -48,10 +77,15 @@ class Transcriber:
 
         self._recognizer = None  # lazy-loaded
         self._whisper_model = None  # lazy-loaded
+        self._stop_event = threading.Event()
 
         # Speaker verification — lazy-loaded, only if profile exists
         self._voice_filter = None
         self._voice_filter_checked = False
+
+    def interrupt_listening(self) -> None:
+        """Interrupt active listening — process whatever audio was captured so far."""
+        self._stop_event.set()
 
     def _get_recognizer(self):
         if self._recognizer is None:
@@ -115,6 +149,7 @@ class Transcriber:
         """
         import speech_recognition as sr
 
+        self._stop_event.clear()
         recognizer = self._get_recognizer()
 
         mic_kwargs = {"sample_rate": SAMPLE_RATE}
@@ -129,9 +164,19 @@ class Transcriber:
 
                 logger.debug("Listening for speech…")
 
+                # Wrap the stream so a user click can interrupt recording
+                wrapper = _InterruptableStream(source.stream, self._stop_event)
+                source.stream = wrapper
+
                 timeout = speech_start_timeout_s if speech_start_timeout_s > 0 else None
                 try:
                     audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=15)
+                except _ListenInterrupted as exc:
+                    logger.info("Listening interrupted — processing %d captured chunks.", len(exc.frames))
+                    if not exc.frames:
+                        return None
+                    frame_data = b"".join(exc.frames)
+                    audio = sr.AudioData(frame_data, SAMPLE_RATE, 2)
                 except sr.WaitTimeoutError:
                     logger.debug("Speech start timeout — no speech detected.")
                     return None

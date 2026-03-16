@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class WakeWordConfig:
     phrases: Dict[str, List[str]] = field(default_factory=dict)  # preset_slug -> wake phrases
     language: str = "en"
+    model: str = "base"  # Whisper model for wake word detection
 
 
 @dataclass
@@ -39,7 +40,7 @@ class LLMConfig:
     model: str = "gpt-4o"
     api_key: str = ""
     temperature: float = 0.85
-    max_tokens: int = 600
+    max_tokens: int = 1500
     max_history_turns: int = 10
     base_url: Optional[str] = None
     preset: str = "rainbow_dash"
@@ -203,6 +204,7 @@ def load_config(path: Path | str = "config.yaml") -> AppConfig:
         wake_word=WakeWordConfig(
             phrases=ww_raw.get("phrases", {}),
             language=ww_raw.get("language", "en"),
+            model=ww_raw.get("model", "base"),
         ),
         audio=AudioConfig(
             input_device_index=audio_raw.get("input_device_index", -1),
@@ -219,7 +221,7 @@ def load_config(path: Path | str = "config.yaml") -> AppConfig:
             model=llm_raw.get("model", "gpt-4o"),
             api_key=llm_api_key,
             temperature=llm_raw.get("temperature", 0.85),
-            max_tokens=llm_raw.get("max_tokens", 600),
+            max_tokens=llm_raw.get("max_tokens", 1500),
             max_history_turns=llm_raw.get("max_history_turns", 10),
             base_url=llm_base_url,
             preset=llm_raw.get("preset", "rainbow_dash"),

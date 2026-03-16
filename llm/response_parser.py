@@ -17,6 +17,9 @@ _ACTION_PATTERN = re.compile(r"\[ACTION:([A-Z_]+)\]", re.IGNORECASE)
 # Matches [DESKTOP:CLICK:500:300], [DESKTOP:OPEN:notepad], etc.
 _DESKTOP_PATTERN = re.compile(r"\[DESKTOP:([^\]]+)\]", re.IGNORECASE)
 
+# Matches a truncated [DESKTOP:... tag at end of response (hit token limit before closing ])
+_DESKTOP_TRUNCATED = re.compile(r"\[DESKTOP:(.+)", re.IGNORECASE | re.DOTALL)
+
 # Matches [DIRECTIVE:nag user to go to gym:7]
 _DIRECTIVE_PATTERN = re.compile(r"\[DIRECTIVE:([^\]]+)\]", re.IGNORECASE)
 
@@ -125,6 +128,18 @@ def parse_response(raw: str) -> ParsedResponse:
                 command=parts[0].strip(),
                 args=[p.strip() for p in parts[1:]],
             ))
+
+    # Handle truncated DESKTOP tag (response cut off by token limit before closing ])
+    if not desktop_commands and "[DESKTOP:" in raw.upper():
+        trunc_match = _DESKTOP_TRUNCATED.search(raw)
+        if trunc_match:
+            content = trunc_match.group(1).rstrip()
+            parts = content.split(":")
+            if parts:
+                desktop_commands.append(DesktopCommand(
+                    command=parts[0].strip(),
+                    args=[p.strip() for p in parts[1:]],
+                ))
 
     # Parse first DIRECTIVE tag (only one allowed per response)
     dir_match = _DIRECTIVE_PATTERN.search(raw)
@@ -237,6 +252,7 @@ def parse_response(raw: str) -> ParsedResponse:
 
     clean_text = _ACTION_PATTERN.sub("", raw)
     clean_text = _DESKTOP_PATTERN.sub("", clean_text)
+    clean_text = _DESKTOP_TRUNCATED.sub("", clean_text)
     clean_text = _DIRECTIVE_PATTERN.sub("", clean_text)
     clean_text = _TIMER_PATTERN.sub("", clean_text)
     clean_text = _ROUTINE_PATTERN.sub("", clean_text)

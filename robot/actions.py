@@ -21,3 +21,4 @@ class RobotAction(Enum):
     VOLUME_DOWN = auto()
     VOLUME_MUTE = auto()
     SCREENSHOT = auto()
+    TRICK = auto()

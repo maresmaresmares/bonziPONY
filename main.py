@@ -104,6 +104,7 @@ def main() -> None:
         wake_phrases=wake_phrases,
         input_device_index=config.audio.input_device_index,
         language=config.wake_word.language,
+        whisper_model=config.wake_word.model,
     )
 
     ack_player = AcknowledgementPlayer()
@@ -417,6 +418,7 @@ def main() -> None:
     pet_controller.conversation_started.connect(_on_conversation_started, Qt.QueuedConnection)
     pet_controller.conversation_ended.connect(_on_conversation_ended, Qt.QueuedConnection)
     pet_controller.action_triggered.connect(_on_action_triggered, Qt.QueuedConnection)
+    pet_controller.trick_requested.connect(pet_window.do_trick, Qt.QueuedConnection)
     pet_controller.timed_override.connect(_on_timed_override, Qt.QueuedConnection)
     pet_controller.move_to.connect(_on_move_to, Qt.QueuedConnection)
 
@@ -434,6 +436,7 @@ def main() -> None:
 
     pet_window.conversation_requested.connect(_on_conversation_requested)
     pet_window.text_message.connect(_on_text_message)
+    pet_window.listen_interrupted.connect(transcriber.interrupt_listening)
 
     # ── Pipeline thread ──────────────────────────────────────────────────────
 

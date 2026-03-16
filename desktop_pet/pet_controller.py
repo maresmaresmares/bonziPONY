@@ -58,6 +58,7 @@ class PetController(QObject):
     conversation_started = pyqtSignal()
     conversation_ended = pyqtSignal()
     action_triggered = pyqtSignal(str)       # RobotAction name
+    trick_requested = pyqtSignal()           # do a cool trick
     timed_override = pyqtSignal(str, int)    # (animation_name, seconds)
     move_to = pyqtSignal(str)               # screen region name
 
@@ -69,7 +70,10 @@ class PetController(QObject):
     def execute(self, action: RobotAction) -> None:
         """Execute a robot action by emitting a signal to the GUI thread."""
         logger.info("PetController action: %s", action.name)
-        self.action_triggered.emit(action.name)
+        if action == RobotAction.TRICK:
+            self.trick_requested.emit()
+        else:
+            self.action_triggered.emit(action.name)
 
     def shutdown(self) -> None:
         """Cleanup on shutdown."""

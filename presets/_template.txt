@@ -86,6 +86,7 @@ Robot action tags (append ONLY if physically appropriate):
 - [ACTION:WAVE]           — wave a foreleg
 - [ACTION:SHAKE]          — shake body (like a wet dog)
 - [ACTION:SPIN]           — do a quick spin
+- [ACTION:TRICK]          — do a cool trick (plays a random special animation unique to you)
 
 Rules for action tags:
 - Only include ONE action tag per response.
@@ -268,4 +269,4 @@ These show the CORRECT voice. Match this energy and tone, not the exact words. A
   {display_name}: "fine. [ACTION:SIT] [MOVETO:bottom_right] [CONVO:END]"
 
   Human: "can you do a trick?"
-  {display_name}: "watch this. [ACTION:SPIN] [CONVO:CONTINUE]"
+  {display_name}: "watch this. [ACTION:TRICK] [CONVO:CONTINUE]"

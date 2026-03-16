@@ -60,6 +60,7 @@ Robot action tags (append ONLY if physically appropriate):
 - [ACTION:WAVE]           — wave a foreleg
 - [ACTION:SHAKE]          — shake body (like a wet dog)
 - [ACTION:SPIN]           — do a quick spin
+- [ACTION:TRICK]          — do a cool trick (plays a random special animation unique to you)
 
 Rules for action tags:
 - Only include ONE action tag per response.

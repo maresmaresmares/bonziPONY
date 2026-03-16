@@ -13,7 +13,8 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QAction, QActionGroup, QApplication, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMenu, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QMenu, QMessageBox, QProgressDialog, QPushButton, QSpinBox, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
 if TYPE_CHECKING:
@@ -731,6 +732,9 @@ class ContextMenuBuilder:
 
         menu.addSeparator()
 
+        update_act = menu.addAction("Check for Updates...")
+        update_act.triggered.connect(lambda: self._check_for_updates(parent))
+
         quit_act = menu.addAction("Quit")
         quit_act.triggered.connect(self.on_quit if self.on_quit else QApplication.quit)
 
@@ -1208,3 +1212,52 @@ class ContextMenuBuilder:
                 subprocess.Popen(["notepad", str(p)])
             except Exception as exc:
                 logger.warning("Failed to open %s: %s", path, exc)
+
+    # ── Self-updater ─────────────────────────────────────────────────────
+
+    def _check_for_updates(self, parent: QWidget) -> None:
+        """Check GitHub for updates and offer to install them."""
+        from core.updater import check_for_updates, pull_updates, install_new_requirements, restart_application
+
+        # Check phase
+        has_updates, status_msg, commits = check_for_updates()
+
+        if not has_updates:
+            QMessageBox.information(parent, "bonziPONY Updater", status_msg)
+            return
+
+        # Build changelog
+        changelog = "\n".join(commits) if commits else "(could not fetch changelog)"
+        detail = f"{status_msg}\n\nNew commits:\n{changelog}"
+
+        reply = QMessageBox.question(
+            parent,
+            "bonziPONY Updater",
+            f"{status_msg}\n\nDo you want to update now?\n\n{changelog}",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # Pull phase
+        ok, pull_msg = pull_updates()
+        if not ok:
+            QMessageBox.warning(parent, "Update Failed", pull_msg)
+            return
+
+        # Install new dependencies
+        dep_ok, dep_msg = install_new_requirements()
+        if not dep_ok:
+            logger.warning("Dependency install issue: %s", dep_msg)
+
+        # Ask to restart
+        reply = QMessageBox.question(
+            parent,
+            "Update Complete",
+            "Update installed successfully!\n\nRestart now to apply changes?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply == QMessageBox.Yes:
+            restart_application()
