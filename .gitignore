@@ -25,3 +25,9 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.venv
+
+# uv
+.python-version
+uv.lock
+pyproject.toml
