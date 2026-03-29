@@ -24,50 +24,112 @@ logger = logging.getLogger(__name__)
 
 # ── Boring URL patterns to filter out ─────────────────────────────────────
 
-_BORING_PREFIXES = (
-    "chrome://", "chrome-extension://", "edge://", "about:",
-    "chrome-native://", "devtools://", "chrome-search://",
-    "chrome-distiller://", "chrome-untrusted://",
-    "extension://", "moz-extension://",
-    "file:///", "blob:", "data:",
-)
-
-_BORING_TITLES = {
-    "", "new tab", "new tab - google chrome", "new tab - microsoft edge",
-    "new tab — mozilla firefox", "start", "home", "speed dial",
-    "most visited sites", "customize chrome",
+BORING_PREFIXES = {
+    "chrome": [
+        "chrome://",
+        "chrome-extension://",
+        "chrome-native://",
+        "devtools://",
+        "chrome-search://",
+        "chrome-distiller://",
+        "chrome-untrusted://",
+        "extension://",
+        "file:///",
+        "blob:",
+        "data:",
+    ],
+    "firefox": [
+        "about:",
+        "moz-extension://",
+        "file:///",
+        "blob:",
+        "data:",
+    ],
+    "edge": [
+        "edge://",
+        "file:///",
+        "blob:",
+        "data:",
+    ],
+    "brave": [
+        "brave://",
+    ]
 }
 
-_BORING_DOMAINS = {
-    "newtab", "extensions", "settings", "flags", "downloads",
-    "history", "bookmarks", "passwords", "apps",
+BORING_TITLES = {
+    "chrome": {
+        "", 
+        "new tab", 
+        "new tab - google chrome", 
+        "start", 
+        "home", 
+        "speed dial", 
+        "most visited sites", 
+        "customize chrome",
+    },
+    "firefox": {
+        "", 
+        "new tab", 
+        "new tab — mozilla firefox", 
+        "start", 
+        "home", 
+        "speed dial", 
+        "most visited sites",
+    },
+    "edge": {
+        "", 
+        "new tab", 
+        "new tab - microsoft edge", 
+        "start", 
+        "home", 
+        "speed dial", 
+        "most visited sites",
+    },
 }
 
+BORING_DOMAINS = {
+    "chrome": {
+        "newtab", "extensions", "settings", "flags", "downloads",
+        "history", "bookmarks", "passwords", "apps",
+    },
+    "firefox": {
+        "newtab", "extensions", "settings", "downloads",
+        "history", "bookmarks", "passwords",
+    },
+    "edge": {
+        "newtab", "extensions", "settings", "flags", "downloads",
+        "history", "bookmarks", "passwords", "apps",
+    },
+}
 
-def _is_boring(url: str, title: str) -> bool:
-    """Return True if this history entry is uninteresting."""
+def _is_boring(url: str, title: str, browser: str) -> bool:
+    """Return True if this history entry is uninteresting for the given browser."""
     url_lower = url.lower()
     title_lower = title.lower().strip()
 
-    if any(url_lower.startswith(p) for p in _BORING_PREFIXES):
-        return True
-    if title_lower in _BORING_TITLES:
+    # Check boring prefixes for the browser
+    prefixes = BORING_PREFIXES.get(browser, [])
+    if any(url_lower.startswith(p) for p in prefixes):
         return True
 
-    # Internal browser pages (chrome://settings, edge://flags, etc.)
+    # Check boring titles for the browser
+    titles = BORING_TITLES.get(browser, set())
+    if title_lower in titles:
+        return True
+
+    # Check boring domains for the browser
+    domains = BORING_DOMAINS.get(browser, set())
     from urllib.parse import urlparse
     try:
         parsed = urlparse(url_lower)
-        if parsed.hostname in _BORING_DOMAINS:
+        if parsed.hostname and parsed.hostname in domains:
             return True
-        # Google search result pages (the search itself, not the result)
+
+        # Special case: Google search result pages
         if parsed.hostname and "google." in parsed.hostname and parsed.path == "/search":
             return True
     except Exception:
         pass
-
-    return False
-
 
 def _chromium_epoch_to_datetime(us: int) -> datetime:
     """Convert Chromium's microseconds-since-1601 to a Python datetime."""
