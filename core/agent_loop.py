@@ -320,6 +320,9 @@ class AgentLoop:
         # Standing rules — permanent, code-enforced behavioral rules
         self._standing_rules: List[StandingRule] = []
 
+        # Pending file-tree result from EXPLORE_FILES command — injected next tick
+        self._pending_explore_result: Optional[str] = None
+
         # Recurring routines (persistent across restarts)
         from core.routines import RoutineManager
         self.routine_manager = RoutineManager()
@@ -2068,6 +2071,13 @@ class AgentLoop:
                 elapsed = self._fmt_duration(now - ts)
                 lines.append(f"- {elapsed}: {desc}")
 
+        # File explorer result — injected once after EXPLORE_FILES command fires
+        if self._pending_explore_result:
+            lines.append("")
+            lines.append("FILE EXPLORER RESULT (from your EXPLORE_FILES request):")
+            lines.append(self._pending_explore_result)
+            self._pending_explore_result = None
+
         # Instructions
         chaos_roll = random.randint(1, 100)
         lines.extend([
@@ -2106,6 +2116,7 @@ class AgentLoop:
             '  - {"command":"SHOW_TAB","args":["url","comment"]} — open a URL and physically drag the browser window to your mouth (like pulling it to show the user). ONLY when user is present. Say "hey look at this!" first.',
             '  - {"command":"SWITCH","args":["window title"]} — bring a specific window to the foreground',
             '  - {"command":"CLOSE_TAB","args":[]} — close the current browser tab (Ctrl+W)',
+            '  - {"command":"EXPLORE_FILES","args":["path","depth"]} — snoop the user\'s file system! Walk a directory and get a compact tree back next tick. path can be "~", "~/Documents", "C:\\\\Users\\\\name\\\\Desktop", etc. depth is 1-4 (default 2). Tree uses numbered folders: [N]=folder #N, [>N]=item inside folder N, [>N][M]=sub-folder M inside N. Use this to be nosy, find context about what they\'re working on, or just browse around.',
             '- create_directive: {"goal":"...","urgency":1-10} or {"goal":"...","urgency":1-10,"delay_minutes":30} or null — goal must be a DIRECT ACTION like "eat food", "go to sleep". NEVER write "remind user to" or "get user to". Use delay_minutes to defer first nag for non-urgent tasks.',
             '- complete_directive: index of directive to mark done, or null',
             '- directives: for EACH active directive by index, set timing AND urgency:',
@@ -2482,6 +2493,21 @@ class AgentLoop:
                                 f"Launched '{matched}'" if ok
                                 else f"LAUNCH_APP '{args[0]}' — not found"
                             )
+                    elif command == "EXPLORE_FILES":
+                        # Walk a directory and store result for next-tick injection
+                        import threading
+                        from core.file_explorer import explore as _explore_files
+                        target_path = args[0] if args else "~"
+                        try:
+                            depth = int(args[1]) if len(args) > 1 else 2
+                        except (ValueError, IndexError):
+                            depth = 2
+                        depth = max(1, min(depth, 4))
+                        def _do_explore(p=target_path, d=depth):
+                            result = _explore_files(p, d)
+                            self._pending_explore_result = result
+                            self._log_action(f"EXPLORE_FILES: {p} (depth {d})")
+                        threading.Thread(target=_do_explore, daemon=True).start()
                     elif command == "SHOW_TAB":
                         # Drag a URL to the pony's mouth (show the user something)
                         if args:
