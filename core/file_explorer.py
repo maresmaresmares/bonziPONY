@@ -102,3 +102,54 @@ def explore(path: str, depth: int = 2) -> str:
     if not lines:
         return f"{header}\n  (empty directory)"
     return header + "\n" + "\n".join(lines)
+
+
+# ── File reader ───────────────────────────────────────────────────────────────
+
+_READ_MAX_CHARS = 8_000
+_TEXT_EXTENSIONS = {
+    ".txt", ".md", ".markdown", ".rst", ".log", ".csv",
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".htm", ".css",
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env",
+    ".sh", ".bat", ".ps1", ".c", ".cpp", ".h", ".java", ".go", ".rs",
+    ".xml", ".svg", ".sql", ".r", ".rb", ".php",
+}
+
+
+def read_file(path: str) -> str:
+    """Read a text file and return its contents, truncated if large.
+
+    Returns a formatted string suitable for LLM context injection.
+    Refuses binary files, enforces an 8 000-char cap.
+    """
+    target = Path(path).expanduser().resolve()
+
+    if not target.exists():
+        return f"READ_FILE: not found — {path}"
+    if target.is_dir():
+        return f"READ_FILE: {target.name} is a directory — use EXPLORE_FILES"
+    if target.stat().st_size == 0:
+        return f"READ_FILE: {target.name} is empty"
+    if target.stat().st_size > 2_000_000:
+        return f"READ_FILE: {target.name} is too large ({target.stat().st_size // 1024} KB) — refusing"
+
+    # Warn (but still try) if extension isn't in the known-text list
+    ext_note = ""
+    if target.suffix.lower() not in _TEXT_EXTENSIONS and target.suffix:
+        ext_note = f" (unusual extension '{target.suffix}' — may be garbled)"
+
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            text = target.read_text(encoding=encoding, errors="replace")
+            break
+        except Exception:
+            continue
+    else:
+        return f"READ_FILE: could not decode {target.name}"
+
+    truncated = ""
+    if len(text) > _READ_MAX_CHARS:
+        text = text[:_READ_MAX_CHARS]
+        truncated = f"\n... (truncated at {_READ_MAX_CHARS} chars)"
+
+    return f"FILE CONTENTS: {target}{ext_note}\n{text}{truncated}"

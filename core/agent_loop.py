@@ -2071,10 +2071,10 @@ class AgentLoop:
                 elapsed = self._fmt_duration(now - ts)
                 lines.append(f"- {elapsed}: {desc}")
 
-        # File explorer result — injected once after EXPLORE_FILES command fires
+        # Snoop tool result — injected once after EXPLORE_FILES/READ_FILE/READ_CLIPBOARD fires
         if self._pending_explore_result:
             lines.append("")
-            lines.append("FILE EXPLORER RESULT (from your EXPLORE_FILES request):")
+            lines.append("SNOOP RESULT (from your last file/clipboard request):")
             lines.append(self._pending_explore_result)
             self._pending_explore_result = None
 
@@ -2117,6 +2117,8 @@ class AgentLoop:
             '  - {"command":"SWITCH","args":["window title"]} — bring a specific window to the foreground',
             '  - {"command":"CLOSE_TAB","args":[]} — close the current browser tab (Ctrl+W)',
             '  - {"command":"EXPLORE_FILES","args":["path","depth"]} — snoop the user\'s file system! Walk a directory and get a compact tree back next tick. path can be "~", "~/Documents", "C:\\\\Users\\\\name\\\\Desktop", etc. depth is 1-4 (default 2). Tree uses numbered folders: [N]=folder #N, [>N]=item inside folder N, [>N][M]=sub-folder M inside N. Use this to be nosy, find context about what they\'re working on, or just browse around.',
+            '  - {"command":"READ_FILE","args":["path"]} — read a text file and get its contents next tick. Great for reading notes, docs, config files, anything the user has open or was recently editing. Supports .txt, .md, .py, .json, .log, etc. Truncated at 8000 chars. Use with EXPLORE_FILES to first find interesting files then read them.',
+            '  - {"command":"READ_CLIPBOARD","args":[]} — peek at the user\'s clipboard history (Win+V feature). Returns up to 10 recent clipboard items — text they\'ve copied. Great for understanding what they\'re working on, what they looked up, what they pasted into things. Results arrive next tick.',
             '- create_directive: {"goal":"...","urgency":1-10} or {"goal":"...","urgency":1-10,"delay_minutes":30} or null — goal must be a DIRECT ACTION like "eat food", "go to sleep". NEVER write "remind user to" or "get user to". Use delay_minutes to defer first nag for non-urgent tasks.',
             '- complete_directive: index of directive to mark done, or null',
             '- directives: for EACH active directive by index, set timing AND urgency:',
@@ -2508,6 +2510,26 @@ class AgentLoop:
                             self._pending_explore_result = result
                             self._log_action(f"EXPLORE_FILES: {p} (depth {d})")
                         threading.Thread(target=_do_explore, daemon=True).start()
+                    elif command == "READ_FILE":
+                        # Read a text file and store contents for next-tick injection
+                        import threading
+                        from core.file_explorer import read_file as _read_file
+                        target_path = args[0] if args else ""
+                        if target_path:
+                            def _do_read(p=target_path):
+                                result = _read_file(p)
+                                self._pending_explore_result = result
+                                self._log_action(f"READ_FILE: {p}")
+                            threading.Thread(target=_do_read, daemon=True).start()
+                    elif command == "READ_CLIPBOARD":
+                        # Read Windows clipboard history and store for next-tick injection
+                        import threading
+                        from core.clipboard_reader import get_clipboard_history, format_clipboard_for_llm
+                        def _do_clipboard():
+                            items = get_clipboard_history()
+                            self._pending_explore_result = format_clipboard_for_llm(items)
+                            self._log_action(f"READ_CLIPBOARD: got {len(items)} item(s)")
+                        threading.Thread(target=_do_clipboard, daemon=True).start()
                     elif command == "SHOW_TAB":
                         # Drag a URL to the pony's mouth (show the user something)
                         if args:
